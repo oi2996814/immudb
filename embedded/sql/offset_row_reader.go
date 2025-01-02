@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,8 @@ limitations under the License.
 */
 
 package sql
+
+import "context"
 
 type offsetRowReader struct {
 	rowReader RowReader
@@ -38,20 +40,12 @@ func (r *offsetRowReader) Tx() *SQLTx {
 	return r.rowReader.Tx()
 }
 
-func (r *offsetRowReader) Database() string {
-	return r.rowReader.Database()
-}
-
 func (r *offsetRowReader) TableAlias() string {
 	return r.rowReader.TableAlias()
 }
 
 func (r *offsetRowReader) Parameters() map[string]interface{} {
 	return r.rowReader.Parameters()
-}
-
-func (r *offsetRowReader) SetParameters(params map[string]interface{}) error {
-	return r.rowReader.SetParameters(params)
 }
 
 func (r *offsetRowReader) OrderBy() []ColDescriptor {
@@ -62,21 +56,21 @@ func (r *offsetRowReader) ScanSpecs() *ScanSpecs {
 	return r.rowReader.ScanSpecs()
 }
 
-func (r *offsetRowReader) Columns() ([]ColDescriptor, error) {
-	return r.rowReader.Columns()
+func (r *offsetRowReader) Columns(ctx context.Context) ([]ColDescriptor, error) {
+	return r.rowReader.Columns(ctx)
 }
 
-func (r *offsetRowReader) colsBySelector() (map[string]ColDescriptor, error) {
-	return r.rowReader.colsBySelector()
+func (r *offsetRowReader) colsBySelector(ctx context.Context) (map[string]ColDescriptor, error) {
+	return r.rowReader.colsBySelector(ctx)
 }
 
-func (r *offsetRowReader) InferParameters(params map[string]SQLValueType) error {
-	return r.rowReader.InferParameters(params)
+func (r *offsetRowReader) InferParameters(ctx context.Context, params map[string]SQLValueType) error {
+	return r.rowReader.InferParameters(ctx, params)
 }
 
-func (r *offsetRowReader) Read() (*Row, error) {
+func (r *offsetRowReader) Read(ctx context.Context) (*Row, error) {
 	for {
-		row, err := r.rowReader.Read()
+		row, err := r.rowReader.Read(ctx)
 		if err != nil {
 			return nil, err
 		}

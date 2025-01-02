@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,11 +32,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/embedded/sql"
 	"github.com/codenotary/immudb/embedded/store"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/fs"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,7 +58,7 @@ var kvs = []*schema.KeyValue{
 func makeDb(t *testing.T) *db {
 	rootPath := t.TempDir()
 
-	options := DefaultOption().WithDBRootPath(rootPath).WithCorruptionChecker(false)
+	options := DefaultOptions().WithDBRootPath(rootPath)
 	options.storeOpts.WithIndexOptions(options.storeOpts.IndexOpts.WithCompactionThld(2))
 
 	return makeDbWith(t, "db", options)
@@ -93,12 +93,58 @@ func (h *dummyMultidbHandler) UseDatabase(ctx context.Context, db string) error 
 	return sql.ErrNoSupported
 }
 
-func (h *dummyMultidbHandler) ExecPreparedStmts(ctx context.Context, stmts []sql.SQLStmt, params map[string]interface{}) (ntx *sql.SQLTx, committedTxs []*sql.SQLTx, err error) {
+type mockUser struct{}
+
+func (u *mockUser) Username() string {
+	return "default"
+}
+
+func (u *mockUser) Permission() sql.Permission {
+	return sql.PermissionAdmin
+}
+
+func (u *mockUser) SQLPrivileges() []sql.SQLPrivilege {
+	return sql.DefaultSQLPrivilegesForPermission(sql.PermissionAdmin)
+}
+
+func (h *dummyMultidbHandler) GetLoggedUser(ctx context.Context) (sql.User, error) {
+	return &mockUser{}, nil
+}
+
+func (h *dummyMultidbHandler) ListUsers(ctx context.Context) ([]sql.User, error) {
+	return nil, sql.ErrNoSupported
+}
+
+func (h *dummyMultidbHandler) CreateUser(ctx context.Context, username, password string, permission sql.Permission) error {
+	return sql.ErrNoSupported
+}
+
+func (h *dummyMultidbHandler) AlterUser(ctx context.Context, username, password string, permission sql.Permission) error {
+	return sql.ErrNoSupported
+}
+
+func (h *dummyMultidbHandler) GrantSQLPrivileges(ctx context.Context, database, username string, privileges []sql.SQLPrivilege) error {
+	return sql.ErrNoSupported
+}
+
+func (h *dummyMultidbHandler) RevokeSQLPrivileges(ctx context.Context, database, username string, privileges []sql.SQLPrivilege) error {
+	return sql.ErrNoSupported
+}
+
+func (h *dummyMultidbHandler) DropUser(ctx context.Context, username string) error {
+	return sql.ErrNoSupported
+}
+
+func (h *dummyMultidbHandler) ExecPreparedStmts(
+	ctx context.Context,
+	opts *sql.TxOptions,
+	stmts []sql.SQLStmt,
+	params map[string]interface{}) (ntx *sql.SQLTx, committedTxs []*sql.SQLTx, err error) {
 	return nil, nil, sql.ErrNoSupported
 }
 
 func TestDefaultDbCreation(t *testing.T) {
-	options := DefaultOption().WithDBRootPath(t.TempDir())
+	options := DefaultOptions().WithDBRootPath(t.TempDir())
 	db, err := NewDB("mydb", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
 
@@ -106,22 +152,23 @@ func TestDefaultDbCreation(t *testing.T) {
 
 	defer db.Close()
 
-	n, err := db.Size()
+	n, err := db.TxCount()
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), n)
+	require.Zero(t, n)
 
-	_, err = db.Count(nil)
-	require.Error(t, err)
+	_, err = db.Count(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.CountAll()
-	require.Error(t, err)
+	res, err := db.CountAll(context.Background())
+	require.NoError(t, err)
+	require.Zero(t, res.Count)
 
 	dbPath := path.Join(options.GetDBRootPath(), db.GetName())
 	require.DirExists(t, dbPath)
 }
 
 func TestDbCreationInAlreadyExistentDirectories(t *testing.T) {
-	options := DefaultOption().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
+	options := DefaultOptions().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
 
 	err := os.MkdirAll(filepath.Join(options.GetDBRootPath(), "EdithPiaf"), os.ModePerm)
 	require.NoError(t, err)
@@ -131,14 +178,14 @@ func TestDbCreationInAlreadyExistentDirectories(t *testing.T) {
 }
 
 func TestDbCreationInInvalidDirectory(t *testing.T) {
-	options := DefaultOption().WithDBRootPath("/?")
+	options := DefaultOptions().WithDBRootPath("/?")
 
 	_, err := NewDB("EdithPiaf", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.Error(t, err)
 }
 
 func TestDbCreation(t *testing.T) {
-	options := DefaultOption().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
+	options := DefaultOptions().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
 	db, err := NewDB("EdithPiaf", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
 
@@ -149,19 +196,19 @@ func TestDbCreation(t *testing.T) {
 }
 
 func TestOpenWithMissingDBDirectories(t *testing.T) {
-	options := DefaultOption().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
+	options := DefaultOptions().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
 	_, err := OpenDB("EdithPiaf", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
-	require.Error(t, err)
+	require.ErrorContains(t, err, "missing database directories")
 }
 
 func TestOpenWithIllegalDBName(t *testing.T) {
-	options := DefaultOption().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
+	options := DefaultOptions().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
 	_, err := OpenDB("", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.ErrorIs(t, err, ErrIllegalArguments)
 }
 
 func TestOpenDB(t *testing.T) {
-	options := DefaultOption().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
+	options := DefaultOptions().WithDBRootPath(filepath.Join(t.TempDir(), "Paris"))
 	db, err := NewDB("EdithPiaf", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
 
@@ -180,11 +227,11 @@ func TestOpenV1_0_1_DB(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "db")
 	require.NoError(t, copier.CopyDir("../../test/data_v1.1.0", dir))
 
-	sysOpts := DefaultOption().WithDBRootPath(dir)
+	sysOpts := DefaultOptions().WithDBRootPath(dir)
 	sysDB, err := OpenDB("systemdb", nil, sysOpts, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
 
-	dbOpts := DefaultOption().WithDBRootPath(dir)
+	dbOpts := DefaultOptions().WithDBRootPath(dir)
 	db, err := OpenDB("defaultdb", nil, dbOpts, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
 
@@ -199,10 +246,10 @@ func TestDbSynchronousSet(t *testing.T) {
 	db := makeDb(t)
 
 	for _, kv := range kvs {
-		_, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{kv}})
+		_, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{kv}})
 		require.NoError(t, err)
 
-		item, err := db.Get(&schema.KeyRequest{Key: kv.Key})
+		item, err := db.Get(context.Background(), &schema.KeyRequest{Key: kv.Key})
 		require.NoError(t, err)
 		require.Equal(t, kv.Key, item.Key)
 		require.Equal(t, kv.Value, item.Value)
@@ -215,37 +262,37 @@ func TestDbSetGet(t *testing.T) {
 	var trustedAlh [sha256.Size]byte
 	var trustedIndex uint64
 
-	_, err := db.Set(nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	_, err := db.Set(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.VerifiableGet(nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	_, err = db.VerifiableGet(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	for i, kv := range kvs[:1] {
-		txhdr, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{kv}})
+		txhdr, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{kv}})
 		require.NoError(t, err)
-		require.Equal(t, uint64(i+2), txhdr.Id)
+		require.Equal(t, uint64(i+1), txhdr.Id)
 
 		if i == 0 {
 			alh := schema.TxHeaderFromProto(txhdr).Alh()
 			copy(trustedAlh[:], alh[:])
-			trustedIndex = 2
+			trustedIndex = 1
 		}
 
 		keyReq := &schema.KeyRequest{Key: kv.Key, SinceTx: txhdr.Id}
 
-		item, err := db.Get(keyReq)
+		item, err := db.Get(context.Background(), keyReq)
 		require.NoError(t, err)
 		require.Equal(t, kv.Key, item.Key)
 		require.Equal(t, kv.Value, item.Value)
 
-		_, err = db.Get(&schema.KeyRequest{Key: kv.Key, SinceTx: txhdr.Id, AtTx: txhdr.Id})
+		_, err = db.Get(context.Background(), &schema.KeyRequest{Key: kv.Key, SinceTx: txhdr.Id, AtTx: txhdr.Id})
 		require.ErrorIs(t, err, ErrIllegalArguments)
 
-		_, err = db.Get(&schema.KeyRequest{Key: kv.Key, SinceTx: txhdr.Id + 1})
+		_, err = db.Get(context.Background(), &schema.KeyRequest{Key: kv.Key, SinceTx: txhdr.Id + 1})
 		require.ErrorIs(t, err, ErrIllegalArguments)
 
-		vitem, err := db.VerifiableGet(&schema.VerifiableGetRequest{
+		vitem, err := db.VerifiableGet(context.Background(), &schema.VerifiableGetRequest{
 			KeyRequest:   keyReq,
 			ProveSinceTx: trustedIndex,
 		})
@@ -297,17 +344,17 @@ func TestDbSetGet(t *testing.T) {
 		require.True(t, verifies)
 	}
 
-	_, err = db.Get(&schema.KeyRequest{Key: []byte{}})
-	require.Error(t, err)
+	_, err = db.Get(context.Background(), &schema.KeyRequest{Key: []byte{}})
+	require.ErrorIs(t, err, ErrIllegalArguments)
 }
 
 func TestDelete(t *testing.T) {
 	db := makeDb(t)
 
-	_, err := db.Delete(nil)
+	_, err := db.Delete(context.Background(), nil)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{
 				Key:   nil,
@@ -317,7 +364,7 @@ func TestDelete(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	hdr, err := db.Set(&schema.SetRequest{
+	hdr, err := db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{
 				Key:   []byte("key1"),
@@ -328,33 +375,33 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("deletion with invalid indexing spec should return an error", func(t *testing.T) {
-		_, err = db.Delete(&schema.DeleteKeysRequest{
+		_, err = db.Delete(context.Background(), &schema.DeleteKeysRequest{
 			Keys: [][]byte{
 				[]byte("key1"),
 			},
 			SinceTx: hdr.Id + 1,
 		})
-		require.ErrorIs(t, err, ErrIllegalArguments)
+		require.ErrorIs(t, err, store.ErrTxNotFound)
 	})
 
-	_, err = db.Get(&schema.KeyRequest{
+	_, err = db.Get(context.Background(), &schema.KeyRequest{
 		Key: []byte("key1"),
 	})
 	require.NoError(t, err)
 
-	hdr, err = db.Delete(&schema.DeleteKeysRequest{
+	hdr, err = db.Delete(context.Background(), &schema.DeleteKeysRequest{
 		Keys: [][]byte{
 			[]byte("key1"),
 		},
 	})
 	require.NoError(t, err)
 
-	_, err = db.Get(&schema.KeyRequest{
+	_, err = db.Get(context.Background(), &schema.KeyRequest{
 		Key: []byte("key1"),
 	})
 	require.ErrorIs(t, err, store.ErrKeyNotFound)
 
-	_, err = db.VerifiableGet(&schema.VerifiableGetRequest{
+	_, err = db.VerifiableGet(context.Background(), &schema.VerifiableGetRequest{
 		KeyRequest: &schema.KeyRequest{
 			Key:  []byte("key1"),
 			AtTx: hdr.Id,
@@ -362,7 +409,7 @@ func TestDelete(t *testing.T) {
 	})
 	require.ErrorIs(t, err, store.ErrKeyNotFound)
 
-	tx, err := db.TxByID(&schema.TxRequest{
+	tx, err := db.TxByID(context.Background(), &schema.TxRequest{
 		Tx: hdr.Id,
 		EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{
@@ -379,15 +426,15 @@ func TestCurrentState(t *testing.T) {
 	db := makeDb(t)
 
 	for ind, val := range kvs {
-		txhdr, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
+		txhdr, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
 		require.NoError(t, err)
-		require.Equal(t, uint64(ind+2), txhdr.Id)
+		require.Equal(t, uint64(ind+1), txhdr.Id)
 
 		time.Sleep(1 * time.Second)
 
 		state, err := db.CurrentState()
 		require.NoError(t, err)
-		require.Equal(t, uint64(ind+2), state.TxId)
+		require.Equal(t, uint64(ind+1), state.TxId)
 	}
 }
 
@@ -397,10 +444,10 @@ func TestSafeSetGet(t *testing.T) {
 	state, err := db.CurrentState()
 	require.NoError(t, err)
 
-	_, err = db.VerifiableSet(nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	_, err = db.VerifiableSet(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.VerifiableSet(&schema.VerifiableSetRequest{
+	_, err = db.VerifiableSet(context.Background(), &schema.VerifiableSetRequest{
 		SetRequest: &schema.SetRequest{
 			KVs: []*schema.KeyValue{
 				{
@@ -409,9 +456,9 @@ func TestSafeSetGet(t *testing.T) {
 				},
 			},
 		},
-		ProveSinceTx: 2,
+		ProveSinceTx: 1,
 	})
-	require.Equal(t, ErrIllegalState, err)
+	require.ErrorIs(t, err, ErrIllegalState)
 
 	kv := []*schema.VerifiableSetRequest{
 		{
@@ -450,18 +497,18 @@ func TestSafeSetGet(t *testing.T) {
 	}
 
 	for ind, val := range kv {
-		vtx, err := db.VerifiableSet(val)
+		vtx, err := db.VerifiableSet(context.Background(), val)
 		require.NoError(t, err)
 		require.NotNil(t, vtx)
 
-		vit, err := db.VerifiableGet(&schema.VerifiableGetRequest{
+		vit, err := db.VerifiableGet(context.Background(), &schema.VerifiableGetRequest{
 			KeyRequest: &schema.KeyRequest{
 				Key:     val.SetRequest.KVs[0].Key,
 				SinceTx: vtx.Tx.Header.Id,
 			},
 		})
 		require.NoError(t, err)
-		require.Equal(t, uint64(ind+2), vit.Entry.Tx)
+		require.Equal(t, uint64(ind+1), vit.Entry.Tx)
 	}
 }
 
@@ -483,14 +530,11 @@ func TestSetGetAll(t *testing.T) {
 		},
 	}
 
-	txhdr, err := db.Set(&schema.SetRequest{KVs: kvs})
+	txhdr, err := db.Set(context.Background(), &schema.SetRequest{KVs: kvs})
 	require.NoError(t, err)
-	require.Equal(t, uint64(2), txhdr.Id)
+	require.Equal(t, uint64(1), txhdr.Id)
 
-	err = db.CompactIndex()
-	require.NoError(t, err)
-
-	itList, err := db.GetAll(&schema.KeyListRequest{
+	itList, err := db.GetAll(context.Background(), &schema.KeyListRequest{
 		Keys: [][]byte{
 			[]byte("Alberto"),
 			[]byte("Jean-Claude"),
@@ -508,17 +552,17 @@ func TestSetGetAll(t *testing.T) {
 func TestTxByID(t *testing.T) {
 	db := makeDb(t)
 
-	_, err := db.TxByID(nil)
-	require.Error(t, ErrIllegalArguments, err)
+	_, err := db.TxByID(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	txhdr1, err := db.Set(&schema.SetRequest{
+	txhdr1, err := db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{Key: []byte("key0"), Value: []byte("value0")},
 		},
 	})
 	require.NoError(t, err)
 
-	txhdr2, err := db.ExecAll(&schema.ExecAllRequest{
+	txhdr2, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 		Operations: []*schema.Op{
 			{
 				Operation: &schema.Op_Ref{
@@ -549,17 +593,17 @@ func TestTxByID(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, _, err = db.SQLExec(&schema.SQLExecRequest{Sql: "CREATE TABLE mytable(id INTEGER AUTO_INCREMENT, PRIMARY KEY id)"}, nil)
+	_, _, err = db.SQLExec(context.Background(), nil, &schema.SQLExecRequest{Sql: "CREATE TABLE mytable(id INTEGER AUTO_INCREMENT, PRIMARY KEY id)"})
 	require.NoError(t, err)
 
-	_, ctx1, err := db.SQLExec(&schema.SQLExecRequest{Sql: "INSERT INTO mytable() VALUES ()"}, nil)
+	_, ctx1, err := db.SQLExec(context.Background(), nil, &schema.SQLExecRequest{Sql: "INSERT INTO mytable() VALUES ()"})
 	require.NoError(t, err)
 	require.Len(t, ctx1, 1)
 
 	txhdr3 := ctx1[0].TxHeader()
 
 	t.Run("values should not be resolved but digests returned in entries field", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr1.Id})
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr1.Id})
 		require.NoError(t, err)
 		require.NotNil(t, tx)
 		require.Len(t, tx.Entries, 1)
@@ -570,7 +614,7 @@ func TestTxByID(t *testing.T) {
 			require.Len(t, e.Value, 0)
 		}
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr2.Id})
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id})
 		require.NoError(t, err)
 		require.NotNil(t, tx)
 		require.Len(t, tx.Entries, 3)
@@ -581,7 +625,7 @@ func TestTxByID(t *testing.T) {
 			require.Len(t, e.Value, 0)
 		}
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr3.ID})
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr3.ID})
 		require.NoError(t, err)
 		require.NotNil(t, tx)
 		require.Len(t, tx.Entries, 1)
@@ -594,7 +638,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("values should not be resolved but digests returned in entries field", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_ONLY_DIGEST},
 		}})
 		require.NoError(t, err)
@@ -607,7 +651,7 @@ func TestTxByID(t *testing.T) {
 			require.Len(t, e.Value, 0)
 		}
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_ONLY_DIGEST},
 			ZEntriesSpec:  &schema.EntryTypeSpec{Action: schema.EntryTypeAction_ONLY_DIGEST},
 		}})
@@ -621,7 +665,7 @@ func TestTxByID(t *testing.T) {
 			require.Len(t, e.Value, 0)
 		}
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
 			SqlEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_ONLY_DIGEST},
 		}})
 		require.NoError(t, err)
@@ -636,21 +680,21 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("no entries should be returned if not explicitly included", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{}})
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{}})
 		require.NoError(t, err)
 		require.NotNil(t, tx)
 		require.Empty(t, tx.Entries)
 		require.Empty(t, tx.KvEntries)
 		require.Empty(t, tx.ZEntries)
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{}})
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{}})
 		require.NoError(t, err)
 		require.NotNil(t, tx)
 		require.Empty(t, tx.Entries)
 		require.Empty(t, tx.KvEntries)
 		require.Empty(t, tx.ZEntries)
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{}})
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{}})
 		require.NoError(t, err)
 		require.NotNil(t, tx)
 		require.Empty(t, tx.Entries)
@@ -659,7 +703,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("no entries should be returned if explicitly excluded", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_EXCLUDE},
 		}})
 		require.NoError(t, err)
@@ -668,7 +712,7 @@ func TestTxByID(t *testing.T) {
 		require.Empty(t, tx.KvEntries)
 		require.Empty(t, tx.ZEntries)
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_EXCLUDE},
 			ZEntriesSpec:  &schema.EntryTypeSpec{Action: schema.EntryTypeAction_EXCLUDE},
 		}})
@@ -678,7 +722,7 @@ func TestTxByID(t *testing.T) {
 		require.Empty(t, tx.KvEntries)
 		require.Empty(t, tx.ZEntries)
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
 			SqlEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_EXCLUDE},
 		}})
 		require.NoError(t, err)
@@ -689,7 +733,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("raw entries should be returned", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr1.Id, EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RAW_VALUE},
 		}})
 		require.NoError(t, err)
@@ -703,7 +747,7 @@ func TestTxByID(t *testing.T) {
 			require.Equal(t, e.HValue, hval[:])
 		}
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
 			ZEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RAW_VALUE},
 		}})
 		require.NoError(t, err)
@@ -717,7 +761,7 @@ func TestTxByID(t *testing.T) {
 			require.Equal(t, e.HValue, hval[:])
 		}
 
-		tx, err = db.TxByID(&schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
+		tx, err = db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
 			SqlEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RAW_VALUE},
 		}})
 		require.NoError(t, err)
@@ -733,7 +777,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("only kv entries should be resolved", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
 			KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RESOLVE},
 		}})
 		require.NoError(t, err)
@@ -749,7 +793,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("only kv entries should be resolved (but not references)", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{
 			Tx: txhdr2.Id,
 			EntriesSpec: &schema.EntriesSpec{
 				KvEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RESOLVE},
@@ -774,7 +818,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("only zentries should be resolved", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr2.Id, EntriesSpec: &schema.EntriesSpec{
 			ZEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RESOLVE},
 		}})
 		require.NoError(t, err)
@@ -790,7 +834,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("only zentries should be resolved (but not including entries)", func(t *testing.T) {
-		tx, err := db.TxByID(&schema.TxRequest{
+		tx, err := db.TxByID(context.Background(), &schema.TxRequest{
 			Tx: txhdr2.Id,
 			EntriesSpec: &schema.EntriesSpec{
 				ZEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RESOLVE},
@@ -810,7 +854,7 @@ func TestTxByID(t *testing.T) {
 	})
 
 	t.Run("sql entries can not be resolved", func(t *testing.T) {
-		_, err := db.TxByID(&schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
+		_, err := db.TxByID(context.Background(), &schema.TxRequest{Tx: txhdr3.ID, EntriesSpec: &schema.EntriesSpec{
 			SqlEntriesSpec: &schema.EntryTypeSpec{Action: schema.EntryTypeAction_RESOLVE},
 		}})
 		require.ErrorIs(t, err, ErrIllegalArguments)
@@ -820,18 +864,18 @@ func TestTxByID(t *testing.T) {
 func TestVerifiableTxByID(t *testing.T) {
 	db := makeDb(t)
 
-	_, err := db.VerifiableTxByID(nil)
-	require.Error(t, ErrIllegalArguments, err)
+	_, err := db.VerifiableTxByID(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	var txhdr *schema.TxHeader
 
 	for _, val := range kvs {
-		txhdr, err = db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
+		txhdr, err = db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
 		require.NoError(t, err)
 	}
 
 	t.Run("values should be returned", func(t *testing.T) {
-		vtx, err := db.VerifiableTxByID(&schema.VerifiableTxRequest{
+		vtx, err := db.VerifiableTxByID(context.Background(), &schema.VerifiableTxRequest{
 			Tx:           txhdr.Id,
 			ProveSinceTx: 0,
 			EntriesSpec: &schema.EntriesSpec{
@@ -849,7 +893,7 @@ func TestVerifiableTxByID(t *testing.T) {
 	})
 
 	t.Run("values should not be returned", func(t *testing.T) {
-		vtx, err := db.VerifiableTxByID(&schema.VerifiableTxRequest{
+		vtx, err := db.VerifiableTxByID(context.Background(), &schema.VerifiableTxRequest{
 			Tx:           txhdr.Id,
 			ProveSinceTx: 0,
 		})
@@ -869,26 +913,26 @@ func TestTxScan(t *testing.T) {
 	require.NoError(t, err)
 
 	for _, val := range kvs {
-		_, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
+		_, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
 		require.NoError(t, err)
 	}
 
-	_, err = db.TxScan(nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	_, err = db.TxScan(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.TxScan(&schema.TxScanRequest{
+	_, err = db.TxScan(context.Background(), &schema.TxScanRequest{
 		InitialTx: 0,
 	})
-	require.Equal(t, ErrIllegalArguments, err)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.TxScan(&schema.TxScanRequest{
+	_, err = db.TxScan(context.Background(), &schema.TxScanRequest{
 		InitialTx: 1,
 		Limit:     uint32(db.MaxResultSize() + 1),
 	})
 	require.ErrorIs(t, err, ErrResultSizeLimitExceeded)
 
 	t.Run("values should be returned reaching result size limit", func(t *testing.T) {
-		txList, err := db.TxScan(&schema.TxScanRequest{
+		txList, err := db.TxScan(context.Background(), &schema.TxScanRequest{
 			InitialTx: initialState.TxId + 1,
 			EntriesSpec: &schema.EntriesSpec{
 				KvEntriesSpec: &schema.EntryTypeSpec{
@@ -896,7 +940,7 @@ func TestTxScan(t *testing.T) {
 				},
 			},
 		})
-		require.ErrorIs(t, err, ErrResultSizeLimitReached)
+		require.NoError(t, err)
 		require.Len(t, txList.Txs, len(kvs))
 
 		for i := 0; i < len(kvs); i++ {
@@ -910,7 +954,7 @@ func TestTxScan(t *testing.T) {
 	t.Run("values should be returned without reaching result size limit", func(t *testing.T) {
 		limit := db.MaxResultSize() - 1
 
-		txList, err := db.TxScan(&schema.TxScanRequest{
+		txList, err := db.TxScan(context.Background(), &schema.TxScanRequest{
 			InitialTx: initialState.TxId + 1,
 			Limit:     uint32(limit),
 			EntriesSpec: &schema.EntriesSpec{
@@ -931,10 +975,10 @@ func TestTxScan(t *testing.T) {
 	})
 
 	t.Run("values should not be returned", func(t *testing.T) {
-		txList, err := db.TxScan(&schema.TxScanRequest{
+		txList, err := db.TxScan(context.Background(), &schema.TxScanRequest{
 			InitialTx: initialState.TxId + 1,
 		})
-		require.ErrorIs(t, err, ErrResultSizeLimitReached)
+		require.NoError(t, err)
 		require.Len(t, txList.Txs, len(kvs))
 
 		for i := 0; i < len(kvs); i++ {
@@ -952,7 +996,7 @@ func TestHistory(t *testing.T) {
 	var lastTx uint64
 
 	for _, val := range kvs {
-		_, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
+		_, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{Key: val.Key, Value: val.Value}}})
 		require.NoError(t, err)
 	}
 
@@ -962,10 +1006,10 @@ func TestHistory(t *testing.T) {
 	err = db.FlushIndex(&schema.FlushIndexRequest{CleanupPercentage: 100, Synced: true})
 	require.NoError(t, err)
 
-	_, err = db.Delete(&schema.DeleteKeysRequest{Keys: [][]byte{kvs[0].Key}})
+	_, err = db.Delete(context.Background(), &schema.DeleteKeysRequest{Keys: [][]byte{kvs[0].Key}})
 	require.NoError(t, err)
 
-	meta, err := db.Set(&schema.SetRequest{
+	meta, err := db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   kvs[0].Key,
 			Value: kvs[0].Value,
@@ -976,21 +1020,21 @@ func TestHistory(t *testing.T) {
 
 	time.Sleep(1 * time.Millisecond)
 
-	_, err = db.History(nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	_, err = db.History(context.Background(), nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = db.History(&schema.HistoryRequest{
+	_, err = db.History(context.Background(), &schema.HistoryRequest{
 		Key:     kvs[0].Key,
 		SinceTx: lastTx,
 		Limit:   int32(db.MaxResultSize() + 1),
 	})
 	require.ErrorIs(t, err, ErrResultSizeLimitExceeded)
 
-	inc, err := db.History(&schema.HistoryRequest{
+	inc, err := db.History(context.Background(), &schema.HistoryRequest{
 		Key:     kvs[0].Key,
 		SinceTx: lastTx,
 	})
-	require.ErrorIs(t, err, ErrResultSizeLimitReached)
+	require.NoError(t, err)
 
 	for i, val := range inc.Entries {
 		require.Equal(t, kvs[0].Key, val.Key)
@@ -1002,12 +1046,12 @@ func TestHistory(t *testing.T) {
 		require.EqualValues(t, i+1, val.Revision)
 	}
 
-	dec, err := db.History(&schema.HistoryRequest{
+	dec, err := db.History(context.Background(), &schema.HistoryRequest{
 		Key:     kvs[0].Key,
 		SinceTx: lastTx,
 		Desc:    true,
 	})
-	require.ErrorIs(t, err, ErrResultSizeLimitReached)
+	require.NoError(t, err)
 
 	for i, val := range dec.Entries {
 		require.Equal(t, kvs[0].Key, val.Key)
@@ -1019,7 +1063,7 @@ func TestHistory(t *testing.T) {
 		require.EqualValues(t, 3-i, val.Revision)
 	}
 
-	inc, err = db.History(&schema.HistoryRequest{
+	inc, err = db.History(context.Background(), &schema.HistoryRequest{
 		Key:     kvs[0].Key,
 		Offset:  uint64(len(kvs) + 1),
 		SinceTx: lastTx,
@@ -1031,7 +1075,7 @@ func TestHistory(t *testing.T) {
 func TestPreconditionedSet(t *testing.T) {
 	db := makeDb(t)
 
-	_, err := db.Set(&schema.SetRequest{
+	_, err := db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key-no-preconditions"),
 			Value: []byte("value"),
@@ -1039,7 +1083,7 @@ func TestPreconditionedSet(t *testing.T) {
 	})
 	require.NoError(t, err, "could not set a value without preconditions")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1051,7 +1095,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not detect missing key when MustExist precondition was present")
 
-	tx1, err := db.Set(&schema.SetRequest{
+	tx1, err := db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1063,7 +1107,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.NoError(t, err,
 		"failed to add a key with MustNotExist precondition even though the key does not exist")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1075,7 +1119,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not detect existing key even though MustNotExist precondition was used")
 
-	tx2, err := db.Set(&schema.SetRequest{
+	tx2, err := db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1087,7 +1131,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.NoError(t, err,
 		"did not add a key even though MustExist precondition was successful")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1099,7 +1143,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not detect NotModifiedAfterTX precondition")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1111,7 +1155,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.NoError(t, err,
 		"did not add valid entry with NotModifiedAfterTX precondition")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte("value"),
@@ -1123,7 +1167,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not detect failed NotModifiedAfterTX precondition after new entry was added")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key2"),
 			Value: []byte("value"),
@@ -1135,7 +1179,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.NoError(t, err,
 		"did not add entry with NotModifiedAfterTX precondition when the key does not exist")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key3"),
 			Value: []byte("value"),
@@ -1148,7 +1192,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not detect failed mix of NotModifiedAfterTX and MustExist preconditions when the key does not exist")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{{
 			Key:   []byte("key3"),
 			Value: []byte("value"),
@@ -1161,7 +1205,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not detect failed mix of MustNotExist and MustExist preconditions when the key does not exist")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{
 				Key:   []byte("key4-no-preconditions"),
@@ -1179,7 +1223,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrPreconditionFailed,
 		"did not fail even though one of KV entries failed precondition check")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{
 				Key:   []byte("key4-no-preconditions"),
@@ -1191,7 +1235,7 @@ func TestPreconditionedSet(t *testing.T) {
 	require.ErrorIs(t, err, store.ErrInvalidPrecondition,
 		"did not fail when invalid nil precondition was given")
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{
 				Key:   []byte("key6"),
@@ -1212,7 +1256,7 @@ func TestPreconditionedSet(t *testing.T) {
 		c = append(c, schema.PreconditionKeyMustNotExist([]byte(fmt.Sprintf("key_%d", i))))
 	}
 
-	_, err = db.Set(&schema.SetRequest{
+	_, err = db.Set(context.Background(), &schema.SetRequest{
 		KVs: []*schema.KeyValue{
 			{
 				Key:   []byte("key6"),
@@ -1270,7 +1314,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 			wg2.Add(parallelism)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.Set(&schema.SetRequest{
+				_, err := db.Set(context.Background(), &schema.SetRequest{
 					KVs: []*schema.KeyValue{{
 						Key:   []byte(`key`),
 						Value: []byte(fmt.Sprintf("goroutine: %d", i)),
@@ -1290,7 +1334,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 		t.Run("MustExist", func(t *testing.T) {
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.Set(&schema.SetRequest{
+				_, err := db.Set(context.Background(), &schema.SetRequest{
 					KVs: []*schema.KeyValue{{
 						Key:   []byte(`key`),
 						Value: []byte(fmt.Sprintf("goroutine: %d", i)),
@@ -1309,14 +1353,14 @@ func TestPreconditionedSetParallel(t *testing.T) {
 
 		t.Run("NotModifiedAfterTX", func(t *testing.T) {
 
-			tx, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{
+			tx, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{
 				Key:   []byte(`key`),
 				Value: []byte(`base value`),
 			}}})
 			require.NoError(t, err)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.Set(&schema.SetRequest{
+				_, err := db.Set(context.Background(), &schema.SetRequest{
 					KVs: []*schema.KeyValue{{
 						Key:   []byte(`key`),
 						Value: []byte(fmt.Sprintf("goroutine: %d", i)),
@@ -1343,7 +1387,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 			wg2.Add(parallelism)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.SetReference(&schema.ReferenceRequest{
+				_, err := db.SetReference(context.Background(), &schema.ReferenceRequest{
 					Key:           []byte(`reference`),
 					ReferencedKey: []byte(`key`),
 					Preconditions: []*schema.Precondition{
@@ -1361,7 +1405,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 		t.Run("MustExist", func(t *testing.T) {
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.SetReference(&schema.ReferenceRequest{
+				_, err := db.SetReference(context.Background(), &schema.ReferenceRequest{
 					Key:           []byte(`reference`),
 					ReferencedKey: []byte(`key`),
 					Preconditions: []*schema.Precondition{
@@ -1378,14 +1422,14 @@ func TestPreconditionedSetParallel(t *testing.T) {
 
 		t.Run("NotModifiedAfterTX", func(t *testing.T) {
 
-			tx, err := db.SetReference(&schema.ReferenceRequest{
+			tx, err := db.SetReference(context.Background(), &schema.ReferenceRequest{
 				Key:           []byte(`reference`),
 				ReferencedKey: []byte(`key`),
 			})
 			require.NoError(t, err)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.SetReference(&schema.ReferenceRequest{
+				_, err := db.SetReference(context.Background(), &schema.ReferenceRequest{
 					Key:           []byte(`reference`),
 					ReferencedKey: []byte(`key`),
 					Preconditions: []*schema.Precondition{
@@ -1410,7 +1454,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 			wg2.Add(parallelism)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.ExecAll(&schema.ExecAllRequest{
+				_, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 					Operations: []*schema.Op{{
 						Operation: &schema.Op_Kv{
 							Kv: &schema.KeyValue{
@@ -1434,7 +1478,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 		t.Run("MustExist", func(t *testing.T) {
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.ExecAll(&schema.ExecAllRequest{
+				_, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 					Operations: []*schema.Op{{
 						Operation: &schema.Op_Kv{
 							Kv: &schema.KeyValue{
@@ -1457,14 +1501,14 @@ func TestPreconditionedSetParallel(t *testing.T) {
 
 		t.Run("NotModifiedAfterTX", func(t *testing.T) {
 
-			tx, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{
+			tx, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{
 				Key:   []byte(`key-ea`),
 				Value: []byte(`base value`),
 			}}})
 			require.NoError(t, err)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.ExecAll(&schema.ExecAllRequest{
+				_, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 					Operations: []*schema.Op{{
 						Operation: &schema.Op_Kv{
 							Kv: &schema.KeyValue{
@@ -1495,7 +1539,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 			wg2.Add(parallelism)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.ExecAll(&schema.ExecAllRequest{
+				_, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 					Operations: []*schema.Op{{
 						Operation: &schema.Op_Ref{
 							Ref: &schema.ReferenceRequest{
@@ -1519,7 +1563,7 @@ func TestPreconditionedSetParallel(t *testing.T) {
 		t.Run("MustExist", func(t *testing.T) {
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.ExecAll(&schema.ExecAllRequest{
+				_, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 					Operations: []*schema.Op{{
 						Operation: &schema.Op_Ref{
 							Ref: &schema.ReferenceRequest{
@@ -1542,14 +1586,14 @@ func TestPreconditionedSetParallel(t *testing.T) {
 
 		t.Run("NotModifiedAfterTX", func(t *testing.T) {
 
-			tx, err := db.SetReference(&schema.ReferenceRequest{
+			tx, err := db.SetReference(context.Background(), &schema.ReferenceRequest{
 				Key:           []byte(`reference-ea`),
 				ReferencedKey: []byte(`key-ea`),
 			})
 			require.NoError(t, err)
 
 			failCount, successCount, badError := runInParallel(func(i int) error {
-				_, err := db.ExecAll(&schema.ExecAllRequest{
+				_, err := db.ExecAll(context.Background(), &schema.ExecAllRequest{
 					Operations: []*schema.Op{{
 						Operation: &schema.Op_Ref{
 							Ref: &schema.ReferenceRequest{
@@ -1615,7 +1659,7 @@ func TestGetAtRevision(t *testing.T) {
 	const histCount = 10
 
 	for i := 0; i < histCount; i++ {
-		_, err := db.Set(&schema.SetRequest{
+		_, err := db.Set(context.Background(), &schema.SetRequest{
 			KVs: []*schema.KeyValue{{
 				Key:   []byte("key"),
 				Value: []byte(fmt.Sprintf("value%d", i)),
@@ -1625,7 +1669,7 @@ func TestGetAtRevision(t *testing.T) {
 	}
 
 	t.Run("get the most recent value if no revision is specified", func(t *testing.T) {
-		k, err := db.Get(&schema.KeyRequest{
+		k, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key: []byte("key"),
 		})
 		require.NoError(t, err)
@@ -1634,7 +1678,7 @@ func TestGetAtRevision(t *testing.T) {
 
 	t.Run("get correct values for positive revision numbers", func(t *testing.T) {
 		for i := 0; i < histCount; i++ {
-			k, err := db.Get(&schema.KeyRequest{
+			k, err := db.Get(context.Background(), &schema.KeyRequest{
 				Key:        []byte("key"),
 				AtRevision: int64(i) + 1,
 			})
@@ -1644,7 +1688,7 @@ func TestGetAtRevision(t *testing.T) {
 	})
 
 	t.Run("get correct error if positive revision number is to high", func(t *testing.T) {
-		_, err := db.Get(&schema.KeyRequest{
+		_, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key:        []byte("key"),
 			AtRevision: 11,
 		})
@@ -1652,7 +1696,7 @@ func TestGetAtRevision(t *testing.T) {
 	})
 
 	t.Run("get correct error if maximum integer value is used for the revision number", func(t *testing.T) {
-		_, err := db.Get(&schema.KeyRequest{
+		_, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key:        []byte("key"),
 			AtRevision: math.MaxInt64,
 		})
@@ -1661,7 +1705,7 @@ func TestGetAtRevision(t *testing.T) {
 
 	t.Run("get correct values for negative revision numbers", func(t *testing.T) {
 		for i := 1; i < histCount; i++ {
-			k, err := db.Get(&schema.KeyRequest{
+			k, err := db.Get(context.Background(), &schema.KeyRequest{
 				Key:        []byte("key"),
 				AtRevision: -int64(i),
 			})
@@ -1671,7 +1715,7 @@ func TestGetAtRevision(t *testing.T) {
 	})
 
 	t.Run("get correct error if negative revision number is to low", func(t *testing.T) {
-		_, err := db.Get(&schema.KeyRequest{
+		_, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key:        []byte("key"),
 			AtRevision: -10,
 		})
@@ -1679,7 +1723,7 @@ func TestGetAtRevision(t *testing.T) {
 	})
 
 	t.Run("get correct error if minimum negative revision number is used", func(t *testing.T) {
-		_, err := db.Get(&schema.KeyRequest{
+		_, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key:        []byte("key"),
 			AtRevision: math.MinInt64,
 		})
@@ -1687,7 +1731,7 @@ func TestGetAtRevision(t *testing.T) {
 	})
 
 	t.Run("get correct error if non-existing key is specified", func(t *testing.T) {
-		_, err := db.Get(&schema.KeyRequest{
+		_, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key:        []byte("non-existing-key"),
 			AtRevision: 1,
 		})
@@ -1695,7 +1739,7 @@ func TestGetAtRevision(t *testing.T) {
 	})
 
 	t.Run("get correct error if expired entry is fetched through revision", func(t *testing.T) {
-		_, err := db.Set(&schema.SetRequest{
+		_, err := db.Set(context.Background(), &schema.SetRequest{
 			KVs: []*schema.KeyValue{{
 				Key:   []byte("exp-key"),
 				Value: []byte("expired-value"),
@@ -1708,7 +1752,7 @@ func TestGetAtRevision(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		_, err = db.Set(&schema.SetRequest{
+		_, err = db.Set(context.Background(), &schema.SetRequest{
 			KVs: []*schema.KeyValue{{
 				Key:   []byte("exp-key"),
 				Value: []byte("not-expired-value"),
@@ -1716,14 +1760,14 @@ func TestGetAtRevision(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		entry, err := db.Get(&schema.KeyRequest{
+		entry, err := db.Get(context.Background(), &schema.KeyRequest{
 			Key: []byte("exp-key"),
 		})
 		require.NoError(t, err)
 		require.Equal(t, []byte("not-expired-value"), entry.Value)
 		require.EqualValues(t, 2, entry.Revision)
 
-		_, err = db.Get(&schema.KeyRequest{
+		_, err = db.Get(context.Background(), &schema.KeyRequest{
 			Key:        []byte("exp-key"),
 			AtRevision: 1,
 		})
@@ -1739,7 +1783,7 @@ func TestRevisionGetConsistency(t *testing.T) {
 	// Repeat the test for different revision numbers
 	for i := 0; i < 10; i++ {
 
-		keyTx, err := db.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{
+		keyTx, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{
 			Key:   []byte("key"),
 			Value: []byte(fmt.Sprintf("value_%d", i)),
 		}}})
@@ -1749,13 +1793,13 @@ func TestRevisionGetConsistency(t *testing.T) {
 			keyTxId = keyTx.Id
 		}
 
-		_, err = db.SetReference(&schema.ReferenceRequest{
+		_, err = db.SetReference(context.Background(), &schema.ReferenceRequest{
 			Key:           []byte("reference_unbound"),
 			ReferencedKey: []byte("key"),
 		})
 		require.NoError(t, err)
 
-		_, err = db.SetReference(&schema.ReferenceRequest{
+		_, err = db.SetReference(context.Background(), &schema.ReferenceRequest{
 			Key:           []byte("reference_bound"),
 			ReferencedKey: []byte("key"),
 			AtTx:          keyTxId,
@@ -1764,10 +1808,10 @@ func TestRevisionGetConsistency(t *testing.T) {
 		require.NoError(t, err)
 
 		t.Run("get and scan should return consistent revision on direct entries", func(t *testing.T) {
-			entryFromGet, err := db.Get(&schema.KeyRequest{Key: []byte("key")})
+			entryFromGet, err := db.Get(context.Background(), &schema.KeyRequest{Key: []byte("key")})
 			require.NoError(t, err)
 
-			scanResults, err := db.Scan(&schema.ScanRequest{Prefix: []byte("key")})
+			scanResults, err := db.Scan(context.Background(), &schema.ScanRequest{Prefix: []byte("key")})
 			require.NoError(t, err)
 			require.Len(t, scanResults.Entries, 1)
 
@@ -1776,11 +1820,11 @@ func TestRevisionGetConsistency(t *testing.T) {
 		})
 
 		t.Run("get and scan should return consistent revision on unbound references", func(t *testing.T) {
-			entryFromGet, err := db.Get(&schema.KeyRequest{Key: []byte("reference_unbound")})
+			entryFromGet, err := db.Get(context.Background(), &schema.KeyRequest{Key: []byte("reference_unbound")})
 			require.NoError(t, err)
 			require.Equal(t, []byte(fmt.Sprintf("value_%d", i)), entryFromGet.Value)
 
-			scanResults, err := db.Scan(&schema.ScanRequest{Prefix: []byte("reference_unbound")})
+			scanResults, err := db.Scan(context.Background(), &schema.ScanRequest{Prefix: []byte("reference_unbound")})
 			require.NoError(t, err)
 			require.Len(t, scanResults.Entries, 1)
 			require.Equal(t, []byte(fmt.Sprintf("value_%d", i)), scanResults.Entries[0].Value)
@@ -1792,16 +1836,15 @@ func TestRevisionGetConsistency(t *testing.T) {
 		})
 
 		t.Run("get and scan should return consistent revision on bound references", func(t *testing.T) {
-			entryFromGet, err := db.Get(&schema.KeyRequest{Key: []byte("reference_bound")})
+			entryFromGet, err := db.Get(context.Background(), &schema.KeyRequest{Key: []byte("reference_bound")})
 			require.NoError(t, err)
 			require.Equal(t, []byte("value_0"), entryFromGet.Value)
 
-			scanResults, err := db.Scan(&schema.ScanRequest{Prefix: []byte("reference_bound")})
+			scanResults, err := db.Scan(context.Background(), &schema.ScanRequest{Prefix: []byte("reference_bound")})
 			require.NoError(t, err)
 			require.Len(t, scanResults.Entries, 1)
 			require.Equal(t, []byte("value_0"), scanResults.Entries[0].Value)
 
-			// Found references do not have revision value calculated
 			require.EqualValues(t, 0, entryFromGet.Revision)
 			require.EqualValues(t, 0, scanResults.Entries[0].Revision)
 
@@ -1814,7 +1857,7 @@ func TestRevisionGetConsistency(t *testing.T) {
 /*
 func TestReference(t *testing.T) {
 db := makeDb(t)
-	_, err := db.Set(kvs[0])
+	_, err := db.Set(context.Background(), kvs[0])
 	if err != nil {
 		t.Fatalf("Reference error %s", err)
 	}
@@ -1826,7 +1869,7 @@ db := makeDb(t)
 	if ref.Index != 1 {
 		t.Fatalf("Reference, expected %v, got %v", 1, ref.Index)
 	}
-	item, err := db.Get(&schema.Key{Key: []byte(`tag`)})
+	item, err := db.Get(context.Background(), &schema.Key{Key: []byte(`tag`)})
 	if err != nil {
 		t.Fatalf("Reference  Get error %s", err)
 	}
@@ -1844,7 +1887,7 @@ db := makeDb(t)
 
 func TestGetReference(t *testing.T) {
 db := makeDb(t)
-	_, err := db.Set(kvs[0])
+	_, err := db.Set(context.Background(), kvs[0])
 	if err != nil {
 		t.Fatalf("Reference error %s", err)
 	}
@@ -1874,7 +1917,7 @@ db := makeDb(t)
 
 func TestZAdd(t *testing.T) {
 db := makeDb(t)
-	_, _ = db.Set(&schema.KeyValue{
+	_, _ = db.Set(context.Background(), &schema.KeyValue{
 		Key:   []byte(`key`),
 		Value: []byte(`val`),
 	})
@@ -1907,7 +1950,7 @@ db := makeDb(t)
 func TestScan(t *testing.T) {
 db := makeDb(t)
 
-	_, err := db.Set(kv[0])
+	_, err := db.Set(context.Background(), kv[0])
 	if err != nil {
 		t.Fatalf("set error %s", err)
 	}
@@ -1940,7 +1983,7 @@ db := makeDb(t)
 		t.Fatalf("SafeZAdd index, expected %v, got %v", 2, it.InclusionProof.I)
 	}
 
-	item, err := db.Scan(&schema.ScanOptions{
+	item, err := db.Scan(context.Background(), &schema.ScanOptions{
 		Offset: nil,
 		Deep:   false,
 		Limit:  1,
@@ -2015,7 +2058,7 @@ db := makeDb(t)
 	}
 
 	// Count
-	c, err := db.Count(&schema.KeyPrefix{
+	c, err := db.Count(context.Background(), &schema.KeyPrefix{
 		Prefix: []byte("Franz"),
 	})
 	if err != nil {
@@ -2165,3 +2208,65 @@ db := makeDb(t)
 	require.NoError(t, err)
 }
 */
+
+func Test_database_truncate(t *testing.T) {
+	options := DefaultOptions().WithDBRootPath(t.TempDir())
+	options.storeOpts.
+		WithEmbeddedValues(false).
+		WithPreallocFiles(false).
+		WithIndexOptions(options.storeOpts.IndexOpts.WithCompactionThld(2)).
+		WithFileSize(8).
+		WithVLogCacheSize(0)
+
+	db := makeDbWith(t, "db", options)
+
+	var queryTime time.Time
+
+	for i := 0; i <= 20; i++ {
+		kv := &schema.KeyValue{
+			Key:   []byte(fmt.Sprintf("key_%d", i)),
+			Value: []byte(fmt.Sprintf("val_%d", i)),
+		}
+		_, err := db.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{kv}})
+		require.NoError(t, err)
+
+		if i == 10 {
+			queryTime = time.Now()
+		}
+	}
+
+	c := NewVlogTruncator(db, logger.NewMemoryLogger())
+
+	hdr, err := c.Plan(context.Background(), queryTime)
+	require.NoError(t, err)
+	require.LessOrEqual(t, time.Unix(hdr.Ts, 0), queryTime)
+
+	err = c.TruncateUptoTx(context.Background(), hdr.Id)
+	require.NoError(t, err)
+
+	for i := hdr.Id; i <= 20; i++ {
+		tx := store.NewTx(db.st.MaxTxEntries(), db.st.MaxKeyLen())
+
+		err = db.st.ReadTx(i, false, tx)
+		require.NoError(t, err)
+
+		for _, e := range tx.Entries() {
+			_, err := db.st.ReadValue(e)
+			require.NoError(t, err)
+		}
+	}
+
+	// ensure that the earlier txs are truncated
+	for i := uint64(5); i > 0; i-- {
+		tx := store.NewTx(db.st.MaxTxEntries(), db.st.MaxKeyLen())
+
+		err = db.st.ReadTx(i, false, tx)
+		require.NoError(t, err)
+
+		for _, e := range tx.Entries() {
+			_, err := db.st.ReadValue(e)
+			require.Error(t, err)
+		}
+	}
+
+}

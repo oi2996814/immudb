@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package fs
 
 import (
+	"archive/zip"
 	"errors"
 	"io/ioutil"
 	"os"
@@ -120,7 +121,8 @@ func TestUnZipSrcNotZipArchive(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "dst")
 	require.NoError(t, ioutil.WriteFile(src, []byte("content"), 0644))
 	zipper := NewStandardZiper()
-	require.Error(t, zipper.UnZipIt(src, dst))
+	err := zipper.UnZipIt(src, dst)
+	require.ErrorIs(t, err, zip.ErrFormat)
 }
 
 func TestUnZipEntryMkdirAllError(t *testing.T) {
@@ -159,5 +161,6 @@ func TestUnZipEntryOpenFileError(t *testing.T) {
 		return nil, errOpenFile
 	}
 	dstUnZip := filepath.Join(t.TempDir(), "unzip-dst")
-	require.Equal(t, errOpenFile, ziper.UnZipIt(dst, dstUnZip))
+	err := ziper.UnZipIt(dst, dstUnZip)
+	require.ErrorIs(t, err, errOpenFile)
 }

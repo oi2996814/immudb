@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,28 +16,42 @@ limitations under the License.
 
 package replication
 
-import "time"
+import (
+	"fmt"
+	"time"
 
-const DefaultChunkSize int = 64 * 1024 // 64 * 1024 64 KiB
-const DefaultPrefetchTxBufferSize int = 100
-const DefaultReplicationCommitConcurrency int = 10
-const DefaultAllowTxDiscarding = false
+	"github.com/codenotary/immudb/pkg/client"
+)
+
+const (
+	DefaultChunkSize                    int = 64 * 1024 // 64 * 1024 64 KiB
+	DefaultPrefetchTxBufferSize         int = 100
+	DefaultReplicationCommitConcurrency int = 10
+	DefaultAllowTxDiscarding                = false
+	DefaultSkipIntegrityCheck               = false
+	DefaultWaitForIndexing                  = false
+)
+
+type ClientFactory func(string, int) client.ImmuClient
 
 type Options struct {
-	masterDatabase   string
-	masterAddress    string
-	masterPort       int
-	followerUsername string
-	followerPassword string
+	primaryDatabase string
+	primaryHost     string
+	primaryPort     int
+	primaryUsername string
+	primaryPassword string
 
 	streamChunkSize int
 
 	prefetchTxBufferSize         int
 	replicationCommitConcurrency int
 
-	allowTxDiscarding bool
+	allowTxDiscarding  bool
+	skipIntegrityCheck bool
+	waitForIndexing    bool
 
-	delayer Delayer
+	delayer       Delayer
+	clientFactory ClientFactory
 }
 
 func DefaultOptions() *Options {
@@ -54,44 +68,72 @@ func DefaultOptions() *Options {
 		prefetchTxBufferSize:         DefaultPrefetchTxBufferSize,
 		replicationCommitConcurrency: DefaultReplicationCommitConcurrency,
 		allowTxDiscarding:            DefaultAllowTxDiscarding,
+		skipIntegrityCheck:           DefaultSkipIntegrityCheck,
+		waitForIndexing:              DefaultWaitForIndexing,
+		clientFactory:                newClient,
 	}
 }
 
-func (opts *Options) Valid() bool {
-	return opts != nil &&
-		opts.streamChunkSize > 0 &&
-		opts.prefetchTxBufferSize > 0 &&
-		opts.replicationCommitConcurrency > 0 &&
-		opts.delayer != nil
+func newClient(host string, port int) client.ImmuClient {
+	opts := client.DefaultOptions().
+		WithAddress(host).
+		WithPort(port).
+		WithDisableIdentityCheck(true)
+
+	return client.NewClient().WithOptions(opts)
 }
 
-// WithMasterDatabase sets the source database name
-func (o *Options) WithMasterDatabase(masterDatabase string) *Options {
-	o.masterDatabase = masterDatabase
+func (opts *Options) Validate() error {
+	if opts == nil {
+		return fmt.Errorf("%w: nil options", ErrInvalidOptions)
+	}
+
+	if opts.streamChunkSize <= 0 {
+		return fmt.Errorf("%w: invalid StreamChunkSize", ErrInvalidOptions)
+	}
+
+	if opts.prefetchTxBufferSize <= 0 {
+		return fmt.Errorf("%w: invalid PrefetchTxBufferSize", ErrInvalidOptions)
+	}
+
+	if opts.replicationCommitConcurrency <= 0 {
+		return fmt.Errorf("%w: invalid ReplicationCommitConcurrency", ErrInvalidOptions)
+	}
+
+	if opts.delayer == nil {
+		return fmt.Errorf("%w: invalid Delayer", ErrInvalidOptions)
+	}
+
+	return nil
+}
+
+// WithPrimaryDatabase sets the source database name
+func (o *Options) WithPrimaryDatabase(primaryDatabase string) *Options {
+	o.primaryDatabase = primaryDatabase
 	return o
 }
 
-// WithMasterAddress sets the source database address
-func (o *Options) WithMasterAddress(masterAddress string) *Options {
-	o.masterAddress = masterAddress
+// WithPrimaryHost sets the source database address
+func (o *Options) WithPrimaryHost(primaryHost string) *Options {
+	o.primaryHost = primaryHost
 	return o
 }
 
-// WithMasterPort sets the source database port
-func (o *Options) WithMasterPort(masterPort int) *Options {
-	o.masterPort = masterPort
+// WithPrimaryPort sets the source database port
+func (o *Options) WithPrimaryPort(primaryPort int) *Options {
+	o.primaryPort = primaryPort
 	return o
 }
 
-// WithFollowerUsername sets username used for replication
-func (o *Options) WithFollowerUsername(followerUsername string) *Options {
-	o.followerUsername = followerUsername
+// WithPrimaryUsername sets username used for replication
+func (o *Options) WithPrimaryUsername(primaryUsername string) *Options {
+	o.primaryUsername = primaryUsername
 	return o
 }
 
-// WithFollowerPassword sets password used for replication
-func (o *Options) WithFollowerPassword(followerPassword string) *Options {
-	o.followerPassword = followerPassword
+// WithPrimaryPassword sets password used for replication
+func (o *Options) WithPrimaryPassword(primaryPassword string) *Options {
+	o.primaryPassword = primaryPassword
 	return o
 }
 
@@ -119,8 +161,26 @@ func (o *Options) WithAllowTxDiscarding(allowTxDiscarding bool) *Options {
 	return o
 }
 
+// WithSkipIntegrityCheck disable integrity checks when reading data during replication
+func (o *Options) WithSkipIntegrityCheck(skipIntegrityCheck bool) *Options {
+	o.skipIntegrityCheck = skipIntegrityCheck
+	return o
+}
+
+// WithWaitForIndexing wait for indexing to be up to date during replication
+func (o *Options) WithWaitForIndexing(waitForIndexing bool) *Options {
+	o.waitForIndexing = waitForIndexing
+	return o
+}
+
 // WithDelayer sets delayer used to pause re-attempts
 func (o *Options) WithDelayer(delayer Delayer) *Options {
 	o.delayer = delayer
+	return o
+}
+
+// WithClientFactoryFunc specifies a function to instantiate a new client
+func (o *Options) WithClientFactoryFunc(clientFactory func(string, int) client.ImmuClient) *Options {
+	o.clientFactory = clientFactory
 	return o
 }

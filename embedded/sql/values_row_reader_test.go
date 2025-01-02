@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,29 +17,30 @@ limitations under the License.
 package sql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestValuesRowReader(t *testing.T) {
-	_, err := newValuesRowReader(nil, nil, "", "", nil)
+	_, err := NewValuesRowReader(nil, nil, nil, true, "", nil)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	cols := []ColDescriptor{
 		{Column: "col1"},
 	}
 
-	_, err = newValuesRowReader(nil, cols, "", "", nil)
+	_, err = NewValuesRowReader(nil, nil, cols, true, "", nil)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = newValuesRowReader(nil, cols, "db1", "", nil)
+	_, err = NewValuesRowReader(nil, nil, cols, true, "", nil)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	_, err = newValuesRowReader(nil, cols, "db1", "table1", nil)
+	_, err = NewValuesRowReader(nil, nil, cols, true, "table1", nil)
 	require.NoError(t, err)
 
-	_, err = newValuesRowReader(nil, cols, "db1", "table1",
+	_, err = NewValuesRowReader(nil, nil, cols, true, "table1",
 		[][]ValueExp{
 			{
 				&Bool{val: true},
@@ -48,10 +49,10 @@ func TestValuesRowReader(t *testing.T) {
 		})
 	require.ErrorIs(t, err, ErrInvalidNumberOfValues)
 
-	_, err = newValuesRowReader(nil,
+	_, err = NewValuesRowReader(nil, nil,
 		[]ColDescriptor{
 			{Table: "table1", Column: "col1"},
-		}, "", "", nil)
+		}, true, "", nil)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	values := [][]ValueExp{
@@ -60,32 +61,19 @@ func TestValuesRowReader(t *testing.T) {
 		},
 	}
 
-	rowReader, err := newValuesRowReader(nil, cols, "db1", "table1", values)
-	require.NoError(t, err)
-
-	require.Equal(t, "db1", rowReader.Database())
-	require.Nil(t, rowReader.OrderBy())
-	require.Nil(t, rowReader.ScanSpecs())
-
-	duplicatedParams := map[string]interface{}{
-		"param1": 1,
-		"Param1": true,
-	}
-
-	err = rowReader.SetParameters(duplicatedParams)
-	require.ErrorIs(t, err, ErrDuplicatedParameters)
-
 	params := map[string]interface{}{
 		"param1": 1,
 	}
 
-	err = rowReader.SetParameters(params)
+	rowReader, err := NewValuesRowReader(nil, params, cols, true, "table1", values)
 	require.NoError(t, err)
+	require.Nil(t, rowReader.OrderBy())
+	require.Nil(t, rowReader.ScanSpecs())
 
 	require.Equal(t, params, rowReader.Parameters())
 
 	paramTypes := make(map[string]string)
-	err = rowReader.InferParameters(paramTypes)
+	err = rowReader.InferParameters(context.Background(), paramTypes)
 	require.NoError(t, err)
 
 	require.NoError(t, rowReader.Close())

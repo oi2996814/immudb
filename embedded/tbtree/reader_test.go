@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,13 +33,16 @@ func TestReaderForEmptyTreeShouldReturnError(t *testing.T) {
 	require.NoError(t, err)
 	defer snapshot.Close()
 
-	r, err := snapshot.NewReader(&ReaderSpec{SeekKey: []byte{0, 0, 0, 0}, DescOrder: false})
+	_, err = snapshot.NewReader(ReaderSpec{SeekKey: make([]byte, tbtree.maxKeySize+1)})
+	require.ErrorIs(t, err, ErrIllegalArguments)
+
+	r, err := snapshot.NewReader(ReaderSpec{SeekKey: []byte{0, 0, 0, 0}, DescOrder: false})
 	require.NoError(t, err)
 
 	_, _, _, _, err = r.Read()
 	require.ErrorIs(t, err, ErrNoMoreEntries)
 
-	_, _, _, err = r.ReadBetween(1, 1)
+	_, _, _, _, err = r.ReadBetween(1, 1)
 	require.ErrorIs(t, err, ErrNoMoreEntries)
 }
 
@@ -51,9 +54,6 @@ func TestReaderWithInvalidSpec(t *testing.T) {
 	require.NotNil(t, snapshot)
 	require.NoError(t, err)
 	defer snapshot.Close()
-
-	_, err = snapshot.NewReader(nil)
-	require.ErrorIs(t, err, ErrIllegalArguments)
 }
 
 func TestReaderAscendingScan(t *testing.T) {
@@ -76,7 +76,7 @@ func TestReaderAscendingScan(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   []byte{0, 0, 0, 250},
 		Prefix:    []byte{0, 0, 0, 250},
 		DescOrder: false,
@@ -103,6 +103,9 @@ func TestReaderAscendingScan(t *testing.T) {
 	_, _, _, _, err = reader.Read()
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
+	err = reader.Reset()
+	require.ErrorIs(t, err, ErrAlreadyClosed)
+
 	err = reader.Close()
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 }
@@ -127,7 +130,7 @@ func TestReaderAscendingScanWithEndingKey(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		EndKey:       []byte{0, 0, 0, 100},
 		InclusiveEnd: true,
 		Prefix:       []byte{0, 0, 0},
@@ -185,7 +188,7 @@ func TestReaderAscendingScanAsBefore(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   []byte{0, 0, 0, 250},
 		Prefix:    []byte{0, 0, 0, 250},
 		DescOrder: false,
@@ -197,7 +200,7 @@ func TestReaderAscendingScanAsBefore(t *testing.T) {
 	require.ErrorIs(t, err, ErrReadersNotClosed)
 
 	for {
-		k, _, hc, err := reader.ReadBetween(0, 1001)
+		k, _, _, hc, err := reader.ReadBetween(0, 1001)
 		if err != nil {
 			require.ErrorIs(t, err, ErrNoMoreEntries)
 			break
@@ -210,7 +213,7 @@ func TestReaderAscendingScanAsBefore(t *testing.T) {
 	err = reader.Close()
 	require.NoError(t, err)
 
-	_, _, _, err = reader.ReadBetween(0, 0)
+	_, _, _, _, err = reader.ReadBetween(0, 0)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = reader.Close()
@@ -228,9 +231,10 @@ func TestReaderAsBefore(t *testing.T) {
 	require.NoError(t, err)
 
 	key := []byte{0, 0, 0, 250}
+	value := []byte{0, 0, 0, 251}
 
 	for i := 0; i < 10; i++ {
-		err = tbtree.Insert(key, key)
+		err = tbtree.Insert(key, value)
 		require.NoError(t, err)
 	}
 
@@ -245,15 +249,16 @@ func TestReaderAsBefore(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		Prefix: key,
 	}
 	reader, err := snapshot.NewReader(rspec)
 	require.NoError(t, err)
 
-	k, ts, hc, err := reader.ReadBetween(1, 9)
+	k, v, ts, hc, err := reader.ReadBetween(1, 9)
 	require.NoError(t, err)
 	require.Equal(t, key, k)
+	require.Equal(t, value, v)
 	require.Equal(t, uint64(9), ts)
 	require.Equal(t, uint64(9), hc)
 
@@ -281,7 +286,7 @@ func TestReaderAscendingScanWithoutSeekKey(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   nil,
 		Prefix:    []byte{0, 0, 0, 250},
 		DescOrder: false,
@@ -336,7 +341,7 @@ func TestReaderDescendingScan(t *testing.T) {
 	prefixKey := make([]byte, 3)
 	prefixKey[2] = 1
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   seekKey,
 		Prefix:    prefixKey,
 		DescOrder: true,
@@ -385,7 +390,7 @@ func TestReaderDescendingScanAsBefore(t *testing.T) {
 	prefixKey := make([]byte, 3)
 	prefixKey[2] = 1
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   seekKey,
 		Prefix:    prefixKey,
 		DescOrder: true,
@@ -400,7 +405,7 @@ func TestReaderDescendingScanAsBefore(t *testing.T) {
 	i := 0
 	prevk := reader.seekKey
 	for {
-		k, _, hc, err := reader.ReadBetween(0, uint64(keyCount))
+		k, _, _, hc, err := reader.ReadBetween(0, uint64(keyCount))
 		if err != nil {
 			require.ErrorIs(t, err, ErrNoMoreEntries)
 			break
@@ -436,7 +441,7 @@ func TestReaderDescendingWithoutSeekKeyScan(t *testing.T) {
 	prefixKey := make([]byte, 3)
 	prefixKey[2] = 1
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   nil,
 		Prefix:    prefixKey,
 		DescOrder: true,
@@ -481,7 +486,7 @@ func TestFullScanAscendingOrder(t *testing.T) {
 	require.Equal(t, uint64(keyCount), snapshot.Ts())
 	defer snapshot.Close()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   nil,
 		Prefix:    nil,
 		DescOrder: false,
@@ -518,7 +523,7 @@ func TestFullScanDescendingOrder(t *testing.T) {
 	require.NoError(t, err)
 	defer snapshot.Close()
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   []byte{255, 255, 255, 255},
 		Prefix:    nil,
 		DescOrder: true,

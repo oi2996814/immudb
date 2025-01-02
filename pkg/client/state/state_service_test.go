@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"github.com/codenotary/immudb/pkg/api/schema"
-	"github.com/codenotary/immudb/pkg/logger"
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
@@ -43,14 +43,14 @@ func TestStateService(t *testing.T) {
 	rs, err := NewStateService(cache, logger, stateProvider, uuidProvider)
 	assert.NoError(t, err)
 
-	state, err := rs.GetState(context.TODO(), "db1")
+	state, err := rs.GetState(context.Background(), "db1")
 	assert.NoError(t, err)
 	assert.IsType(t, &schema.ImmutableState{}, state)
 
 	err = rs.SetState(&schema.ImmutableState{}, "db1")
 	assert.NoError(t, err)
 
-	state, err = rs.GetState(context.TODO(), "db1")
+	state, err = rs.GetState(context.Background(), "db1")
 	assert.NoError(t, err)
 	assert.IsType(t, &schema.ImmutableState{}, state)
 }

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,7 +40,7 @@ func TestStandardFilepath(t *testing.T) {
 		return "", errAbs
 	}
 	_, err = fp.Abs(relPath)
-	require.Equal(t, errAbs, err)
+	require.ErrorIs(t, err, errAbs)
 	fp.AbsF = absFOK
 
 	// Base
@@ -83,11 +83,8 @@ func TestStandardFilepath(t *testing.T) {
 	fp.WalkF = func(root string, walkFn filepath.WalkFunc) error {
 		return errWalk
 	}
-	require.Equal(t,
-		errWalk,
-		fp.Walk(
-			"root",
-			func(path string, info os.FileInfo, err error) error { return nil }))
+	err = fp.Walk("root", func(path string, info os.FileInfo, err error) error { return nil })
+	require.ErrorIs(t, err, errWalk)
 	fp.WalkF = walkFOK
 
 	// FromSlash ...

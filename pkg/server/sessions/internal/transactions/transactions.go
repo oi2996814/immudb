@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,31 +30,29 @@ type transaction struct {
 	mutex         sync.RWMutex
 	transactionID string
 	sqlTx         *sql.SQLTx
-	txMode        schema.TxMode
 	db            database.DB
 	sessionID     string
 }
 
 type Transaction interface {
 	GetID() string
-	GetMode() schema.TxMode
 	IsClosed() bool
 	Rollback() error
-	Commit() ([]*sql.SQLTx, error)
+	Commit(ctx context.Context) ([]*sql.SQLTx, error)
 	GetSessionID() string
-	SQLExec(request *schema.SQLExecRequest) error
-	SQLQuery(request *schema.SQLQueryRequest) (*schema.SQLQueryResult, error)
+	Database() database.DB
+	SQLExec(ctx context.Context, request *schema.SQLExecRequest) error
+	SQLQuery(ctx context.Context, request *schema.SQLQueryRequest) (sql.RowReader, error)
 }
 
-func NewTransaction(ctx context.Context, mode schema.TxMode, db database.DB, sessionID string) (*transaction, error) {
-	transactionID := xid.New().String()
-
-	tx, err := db.NewSQLTx(ctx)
-	if err != nil {
-		return nil, err
+func NewTransaction(ctx context.Context, opts *sql.TxOptions, db database.DB, sessionID string) (*transaction, error) {
+	if opts == nil {
+		return nil, sql.ErrIllegalArguments
 	}
 
-	sqlTx, _, err := db.SQLExec(&schema.SQLExecRequest{Sql: "BEGIN TRANSACTION;"}, tx)
+	transactionID := xid.New().String()
+
+	sqlTx, err := db.NewSQLTx(ctx, opts.WithExplicitClose(true))
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +60,6 @@ func NewTransaction(ctx context.Context, mode schema.TxMode, db database.DB, ses
 	return &transaction{
 		sqlTx:         sqlTx,
 		transactionID: transactionID,
-		txMode:        mode,
 		db:            db,
 		sessionID:     sessionID,
 	}, nil
@@ -73,13 +70,6 @@ func (tx *transaction) GetID() string {
 	defer tx.mutex.RUnlock()
 
 	return tx.transactionID
-}
-
-func (tx *transaction) GetMode() schema.TxMode {
-	tx.mutex.RLock()
-	defer tx.mutex.RUnlock()
-
-	return tx.txMode
 }
 
 func (tx *transaction) IsClosed() bool {
@@ -100,7 +90,7 @@ func (tx *transaction) Rollback() error {
 	return tx.sqlTx.Cancel()
 }
 
-func (tx *transaction) Commit() ([]*sql.SQLTx, error) {
+func (tx *transaction) Commit(ctx context.Context) ([]*sql.SQLTx, error) {
 	tx.mutex.Lock()
 	defer tx.mutex.Unlock()
 
@@ -108,7 +98,7 @@ func (tx *transaction) Commit() ([]*sql.SQLTx, error) {
 		return nil, sql.ErrNoOngoingTx
 	}
 
-	_, cTxs, err := tx.db.SQLExec(&schema.SQLExecRequest{Sql: "COMMIT;"}, tx.sqlTx)
+	_, cTxs, err := tx.db.SQLExec(ctx, tx.sqlTx, &schema.SQLExecRequest{Sql: "COMMIT;"})
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +113,7 @@ func (tx *transaction) GetSessionID() string {
 	return tx.sessionID
 }
 
-func (tx *transaction) SQLExec(request *schema.SQLExecRequest) (err error) {
+func (tx *transaction) SQLExec(ctx context.Context, request *schema.SQLExecRequest) (err error) {
 	tx.mutex.Lock()
 	defer tx.mutex.Unlock()
 
@@ -131,12 +121,12 @@ func (tx *transaction) SQLExec(request *schema.SQLExecRequest) (err error) {
 		return sql.ErrNoOngoingTx
 	}
 
-	tx.sqlTx, _, err = tx.db.SQLExec(request, tx.sqlTx)
+	tx.sqlTx, _, err = tx.db.SQLExec(ctx, tx.sqlTx, request)
 
 	return err
 }
 
-func (tx *transaction) SQLQuery(request *schema.SQLQueryRequest) (res *schema.SQLQueryResult, err error) {
+func (tx *transaction) SQLQuery(ctx context.Context, request *schema.SQLQueryRequest) (sql.RowReader, error) {
 	tx.mutex.Lock()
 	defer tx.mutex.Unlock()
 
@@ -144,5 +134,9 @@ func (tx *transaction) SQLQuery(request *schema.SQLQueryRequest) (res *schema.SQ
 		return nil, sql.ErrNoOngoingTx
 	}
 
-	return tx.db.SQLQuery(request, tx.sqlTx)
+	return tx.db.SQLQuery(ctx, tx.sqlTx, request)
+}
+
+func (tx *transaction) Database() database.DB {
+	return tx.db
 }

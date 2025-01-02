@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,65 +17,91 @@ limitations under the License.
 package server
 
 import (
+	"context"
 	"crypto/tls"
-	"encoding/json"
-	"net"
-	"sync"
+	"strings"
 
+	"net"
+
+	"github.com/codenotary/immudb/embedded/logger"
+	"github.com/codenotary/immudb/embedded/sql"
 	"github.com/codenotary/immudb/pkg/api/schema"
-	"github.com/codenotary/immudb/pkg/auth"
+	"github.com/codenotary/immudb/pkg/client"
 	"github.com/codenotary/immudb/pkg/database"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/codenotary/immudb/pkg/pgsql/errors"
-	bm "github.com/codenotary/immudb/pkg/pgsql/server/bmessages"
 	fm "github.com/codenotary/immudb/pkg/pgsql/server/fmessages"
 	"github.com/codenotary/immudb/pkg/pgsql/server/pgmeta"
 )
 
 type session struct {
-	tlsConfig       *tls.Config
-	log             logger.Logger
-	mr              MessageReader
-	username        string
-	database        database.DB
-	sysDb           database.DB
+	immudbHost         string
+	immudbPort         int
+	tlsConfig          *tls.Config
+	log                logger.Logger
+	logRequestMetadata bool
+
+	dbList database.DatabaseList
+
+	client client.ImmuClient
+
+	ctx    context.Context
+	user   string
+	ipAddr string
+	db     database.DB
+	tx     *sql.SQLTx
+
+	mr MessageReader
+
 	connParams      map[string]string
 	protocolVersion string
-	portals         map[string]*portal
-	statements      map[string]*statement
-	sync.Mutex
+
+	statements map[string]*statement
+	portals    map[string]*portal
 }
 
 type Session interface {
 	InitializeSession() error
-	HandleStartup(dbList database.DatabaseList) error
-	QueriesMachine() (err error)
-	ErrorHandle(err error)
+	HandleStartup(context.Context) error
+	QueryMachine() error
+	HandleError(error)
+	Close() error
 }
 
-func NewSession(c net.Conn, log logger.Logger, sysDb database.DB, tlsConfig *tls.Config) *session {
-	s := &session{
-		tlsConfig:  tlsConfig,
-		log:        log,
-		mr:         NewMessageReader(c),
-		sysDb:      sysDb,
-		portals:    make(map[string]*portal),
-		statements: make(map[string]*statement),
+func newSession(
+	c net.Conn,
+	immudbHost string,
+	immudbPort int,
+	log logger.Logger,
+	tlsConfig *tls.Config,
+	logRequestMetadata bool,
+	dbList database.DatabaseList,
+) *session {
+	addr := c.RemoteAddr().String()
+	i := strings.Index(addr, ":")
+	if i >= 0 {
+		addr = addr[:i]
 	}
-	return s
+
+	return &session{
+		immudbHost:         immudbHost,
+		immudbPort:         immudbPort,
+		tlsConfig:          tlsConfig,
+		log:                log,
+		logRequestMetadata: logRequestMetadata,
+		dbList:             dbList,
+		ipAddr:             addr,
+		mr:                 NewMessageReader(c),
+		statements:         make(map[string]*statement),
+		portals:            make(map[string]*portal),
+	}
 }
 
-func (s *session) ErrorHandle(e error) {
-	if e != nil {
-		er := errors.MapPgError(e)
-		_, err := s.writeMessage(er.Encode())
-		if err != nil {
-			s.log.Errorf("unable to write error on wire: %v", err)
-		}
-		s.log.Debugf("%s", er.ToString())
-		if _, err := s.writeMessage(bm.ReadyForQuery()); err != nil {
-			s.log.Errorf("unable to complete error handling: %v", err)
-		}
+func (s *session) HandleError(e error) {
+	pgerr := errors.MapPgError(e)
+
+	_, err := s.writeMessage(pgerr.Encode())
+	if err != nil {
+		s.log.Errorf("unable to write error on wire: %w", err)
 	}
 }
 
@@ -84,8 +110,11 @@ func (s *session) nextMessage() (interface{}, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+
 	s.log.Debugf("received %s - %s message", string(msg.t), pgmeta.MTypes[msg.t])
+
 	extQueryMode := false
+
 	i, err := s.parseRawMessage(msg)
 	if msg.t == 'P' ||
 		msg.t == 'B' ||
@@ -94,6 +123,7 @@ func (s *session) nextMessage() (interface{}, bool, error) {
 		msg.t == 'H' {
 		extQueryMode = true
 	}
+
 	return i, extQueryMode, err
 }
 
@@ -123,33 +153,24 @@ func (s *session) parseRawMessage(msg *rawMessage) (interface{}, error) {
 }
 
 func (s *session) writeMessage(msg []byte) (int, error) {
-	s.debugMessage(msg)
+	if len(msg) > 0 {
+		s.log.Debugf("write %s - %s message", string(msg[0]), pgmeta.MTypes[msg[0]])
+	}
+
 	return s.mr.Write(msg)
 }
 
-func (s *session) debugMessage(msg []byte) {
-	if s.log != nil && len(msg) > 0 {
-		s.log.Debugf("write %s - %s message", string(msg[0]), pgmeta.MTypes[msg[0]])
-	}
-}
-
-func (s *session) getUser(username []byte) (*auth.User, error) {
-	key := make([]byte, 1+len(username))
-	// todo put KeyPrefixUser in a common package
-	key[0] = 1
-	copy(key[1:], username)
-
-	item, err := s.sysDb.Get(&schema.KeyRequest{Key: key})
-	if err != nil {
-		return nil, err
+func (s *session) sqlTx() (*sql.SQLTx, error) {
+	if s.tx != nil || !s.logRequestMetadata {
+		return s.tx, nil
 	}
 
-	var usr auth.User
-
-	err = json.Unmarshal(item.Value, &usr)
-	if err != nil {
-		return nil, err
+	md := schema.Metadata{
+		schema.UserRequestMetadataKey: s.user,
+		schema.IpRequestMetadataKey:   s.ipAddr,
 	}
 
-	return &usr, nil
+	// create transaction explicitly to inject request metadata
+	ctx := schema.ContextWithMetadata(s.ctx, md)
+	return s.db.NewSQLTx(ctx, sql.DefaultTxOptions())
 }

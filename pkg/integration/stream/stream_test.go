@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,7 @@ import (
 
 	ic "github.com/codenotary/immudb/pkg/client"
 	"github.com/codenotary/immudb/pkg/client/errors"
+	"github.com/codenotary/immudb/pkg/signer"
 
 	"fmt"
 	"io"
@@ -128,7 +129,7 @@ func TestImmuClient_SetMaxValueExceeded(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = client.StreamSet(context.Background(), kvs)
-	require.Equal(t, stream.ErrMaxValueLenExceeded, err.Error())
+	require.ErrorContains(t, err, stream.ErrMaxValueLenExceeded)
 	require.Equal(t, errors.CodDataException, err.(errors.ImmuError).Code())
 }
 
@@ -154,7 +155,7 @@ func TestImmuClient_SetMaxTxValuesExceeded(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = client.StreamSet(context.Background(), kvs)
-	require.Equal(t, stream.ErrMaxTxValuesLenExceeded, err.(errors.ImmuError).Error())
+	require.ErrorContains(t, err, stream.ErrMaxTxValuesLenExceeded)
 	require.Equal(t, errors.CodDataException, err.(errors.ImmuError).Code())
 }
 
@@ -364,8 +365,7 @@ func TestImmuClient_SetEmptyReader(t *testing.T) {
 
 	kvs := []*stream.KeyValue{kv1, kv2}
 	hdr, err := client.StreamSet(context.Background(), kvs)
-	require.Equal(t, stream.ErrReaderIsEmpty, err.Error())
-	require.Equal(t, errors.CodInvalidParameterValue, err.(errors.ImmuError).Code())
+	require.ErrorIs(t, err, io.EOF)
 	require.Nil(t, hdr)
 }
 
@@ -385,7 +385,7 @@ func TestImmuClient_SetSizeTooLarge(t *testing.T) {
 
 	kvs := []*stream.KeyValue{kv1}
 	hdr, err := client.StreamSet(context.Background(), kvs)
-	require.Equal(t, stream.ErrNotEnoughDataOnStream, err.Error())
+	require.ErrorIs(t, err, io.EOF)
 	require.Nil(t, hdr)
 }
 
@@ -400,7 +400,7 @@ func TestImmuClient_SetSizeTooLargeOnABigMessage(t *testing.T) {
 	kvs1[0].Value.Size = 22_000_000
 
 	hdr, err := client.StreamSet(context.Background(), kvs1)
-	require.Equal(t, stream.ErrNotEnoughDataOnStream, err.Error())
+	require.ErrorIs(t, err, io.EOF)
 	require.Nil(t, hdr)
 
 	f1, _ := streamtest.GenerateDummyFile("myFile1", 10_000_000)
@@ -414,7 +414,7 @@ func TestImmuClient_SetSizeTooLargeOnABigMessage(t *testing.T) {
 	kvs2[1].Value.Size = 12_000_000
 
 	hdr, err = client.StreamSet(context.Background(), kvs2)
-	require.Equal(t, stream.ErrNotEnoughDataOnStream, err.Error())
+	require.ErrorIs(t, err, io.EOF)
 	require.Nil(t, hdr)
 }
 
@@ -494,8 +494,8 @@ func TestImmuClient_StreamWithSignature(t *testing.T) {
 
 	_, err := client.StreamVerifiedSet(context.Background(), []*stream.KeyValue{{
 		Key: &stream.ValueSize{
-			Content: bufio.NewReader(bytes.NewBuffer([]byte(`key`))),
-			Size:    len([]byte(`key`)),
+			Content: bufio.NewReader(bytes.NewBuffer([]byte(`key1`))),
+			Size:    len([]byte(`key1`)),
 		},
 		Value: &stream.ValueSize{
 			Content: bufio.NewReader(bytes.NewBuffer([]byte(`val`))),
@@ -504,7 +504,25 @@ func TestImmuClient_StreamWithSignature(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{KeyRequest: &schema.KeyRequest{Key: []byte(`key`)}})
+	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{KeyRequest: &schema.KeyRequest{Key: []byte(`key1`)}})
+	require.NoError(t, err)
+
+	hdr2, err := client.StreamVerifiedSet(context.Background(), []*stream.KeyValue{{
+		Key: &stream.ValueSize{
+			Content: bufio.NewReader(bytes.NewBuffer([]byte(`key2`))),
+			Size:    len([]byte(`key2`)),
+		},
+		Value: &stream.ValueSize{
+			Content: bufio.NewReader(bytes.NewBuffer([]byte(`val`))),
+			Size:    len([]byte(`val`)),
+		},
+	}})
+	require.NoError(t, err)
+
+	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{
+		KeyRequest:   &schema.KeyRequest{Key: []byte(`key1`)},
+		ProveSinceTx: hdr2.Id,
+	})
 	require.NoError(t, err)
 }
 
@@ -521,10 +539,10 @@ func TestImmuClient_StreamWithSignatureErrors(t *testing.T) {
 			Size:    len([]byte(`val`)),
 		},
 	}})
-	require.Error(t, err)
+	require.ErrorContains(t, err, signer.ErrKeyCannotBeVerified.Error())
 
 	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{KeyRequest: &schema.KeyRequest{Key: []byte(`key`)}})
-	require.Error(t, err)
+	require.ErrorContains(t, err, signer.ErrKeyCannotBeVerified.Error())
 }
 
 func TestImmuClient_StreamWithSignatureErrorsMissingServerKey(t *testing.T) {
@@ -540,10 +558,10 @@ func TestImmuClient_StreamWithSignatureErrorsMissingServerKey(t *testing.T) {
 			Size:    len([]byte(`val`)),
 		},
 	}})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "unable to verify signature")
 
 	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{KeyRequest: &schema.KeyRequest{Key: []byte(`key`)}})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "unable to verify signature")
 }
 
 func TestImmuClient_StreamWithSignatureErrorsWrongClientKey(t *testing.T) {
@@ -577,7 +595,7 @@ func TestImmuClient_StreamWithSignatureErrorsWrongClientKey(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{KeyRequest: &schema.KeyRequest{Key: []byte(`key`)}})
-	require.ErrorContains(t, err, "signature doesn't match")
+	require.ErrorContains(t, err, signer.ErrKeyCannotBeVerified.Error())
 
 	_, err = client.StreamVerifiedSet(context.Background(), []*stream.KeyValue{{
 		Key: &stream.ValueSize{
@@ -589,7 +607,7 @@ func TestImmuClient_StreamWithSignatureErrorsWrongClientKey(t *testing.T) {
 			Size:    len([]byte(`val`)),
 		},
 	}})
-	require.ErrorContains(t, err, "signature doesn't match")
+	require.ErrorContains(t, err, signer.ErrKeyCannotBeVerified.Error())
 }
 
 func TestImmuClient_StreamerServiceErrors(t *testing.T) {
@@ -605,7 +623,7 @@ func TestImmuClient_StreamerServiceErrors(t *testing.T) {
 	sfm.NewMsgSenderF = func(str stream.ImmuServiceSender_Stream) stream.MsgSender {
 		sm := streamtest.DefaultImmuServiceSenderStreamMock()
 		s := streamtest.DefaultMsgSenderMock(sm, 4096)
-		s.SendF = func(reader io.Reader, payloadSize int) (err error) {
+		s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
 			return errors.New("custom one")
 		}
 		return streamtest.DefaultMsgSenderMock(sm, 4096)
@@ -650,7 +668,7 @@ func TestImmuClient_StreamerServiceErrors(t *testing.T) {
 			Size:    len([]byte(`val`)),
 		},
 	}})
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 
 	_, err = client.StreamVerifiedGet(context.Background(), &schema.VerifiableGetRequest{KeyRequest: &schema.KeyRequest{Key: []byte(`key`)}})
 	require.ErrorContains(t, err, "custom one")
@@ -670,10 +688,10 @@ func TestImmuClient_StreamerServiceErrors(t *testing.T) {
 	}
 
 	_, err = client.StreamSet(context.Background(), []*stream.KeyValue{kv})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "no entries provided")
 
 	_, err = client.StreamGet(context.Background(), &schema.KeyRequest{Key: key})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "custom one")
 
 	_, err = client.StreamExecAll(context.Background(), &stream.ExecAllRequest{
 		Operations: []*stream.Op{
@@ -690,7 +708,7 @@ func TestImmuClient_StreamerServiceErrors(t *testing.T) {
 			},
 		},
 	})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "empty set")
 }
 
 func TestImmuClient_StreamerServiceHistoryErrors(t *testing.T) {
@@ -729,10 +747,10 @@ func TestImmuClient_StreamerServiceHistoryErrors(t *testing.T) {
 	client.WithStreamServiceFactory(sfm)
 
 	_, err = client.StreamZScan(context.Background(), &schema.ZScanRequest{Set: []byte(`key`)})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "custom one")
 
 	_, err = client.StreamHistory(context.Background(), &schema.HistoryRequest{Key: []byte(`key`)})
-	require.Error(t, err)
+	require.ErrorContains(t, err, "custom one")
 }
 
 func TestImmuClient_ChunkToChunkGetStream(t *testing.T) {

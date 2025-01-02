@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -137,6 +137,16 @@ func DualProofToProto(dualProof *store.DualProof) *DualProof {
 		TargetBlTxAlh:      dualProof.TargetBlTxAlh[:],
 		LastInclusionProof: DigestsToProto(dualProof.LastInclusionProof),
 		LinearProof:        LinearProofToProto(dualProof.LinearProof),
+		LinearAdvanceProof: LinearAdvanceProofToProto(dualProof.LinearAdvanceProof),
+	}
+}
+
+func DualProofV2ToProto(dualProof *store.DualProofV2) *DualProofV2 {
+	return &DualProofV2{
+		SourceTxHeader:   TxHeaderToProto(dualProof.SourceTxHeader),
+		TargetTxHeader:   TxHeaderToProto(dualProof.TargetTxHeader),
+		InclusionProof:   DigestsToProto(dualProof.InclusionProof),
+		ConsistencyProof: DigestsToProto(dualProof.ConsistencyProof),
 	}
 }
 
@@ -163,7 +173,15 @@ func TxMetadataToProto(md *store.TxMetadata) *TxMetadata {
 		return nil
 	}
 
-	return &TxMetadata{}
+	txmd := &TxMetadata{}
+	if md.HasTruncatedTxID() {
+		txID, _ := md.GetTruncatedTxID()
+		txmd.TruncatedTxID = txID
+	}
+
+	txmd.Extra = md.Extra()
+
+	return txmd
 }
 
 func LinearProofToProto(linearProof *store.LinearProof) *LinearProof {
@@ -171,6 +189,24 @@ func LinearProofToProto(linearProof *store.LinearProof) *LinearProof {
 		SourceTxId: linearProof.SourceTxID,
 		TargetTxId: linearProof.TargetTxID,
 		Terms:      DigestsToProto(linearProof.Terms),
+	}
+}
+
+func LinearAdvanceProofToProto(proof *store.LinearAdvanceProof) *LinearAdvanceProof {
+	if proof == nil {
+		return nil
+	}
+
+	inclusionProofs := make([]*InclusionProof, len(proof.InclusionProofs))
+	for i, p := range proof.InclusionProofs {
+		inclusionProofs[i] = &InclusionProof{
+			Terms: DigestsToProto(p),
+		}
+	}
+
+	return &LinearAdvanceProof{
+		LinearProofTerms: DigestsToProto(proof.LinearProofTerms),
+		InclusionProofs:  inclusionProofs,
 	}
 }
 
@@ -183,6 +219,16 @@ func DualProofFromProto(dproof *DualProof) *store.DualProof {
 		TargetBlTxAlh:      DigestFromProto(dproof.TargetBlTxAlh),
 		LastInclusionProof: DigestsFromProto(dproof.LastInclusionProof),
 		LinearProof:        LinearProofFromProto(dproof.LinearProof),
+		LinearAdvanceProof: LinearAdvanceProofFromProto(dproof.LinearAdvanceProof),
+	}
+}
+
+func DualProofV2FromProto(dproof *DualProofV2) *store.DualProofV2 {
+	return &store.DualProofV2{
+		SourceTxHeader:   TxHeaderFromProto(dproof.SourceTxHeader),
+		TargetTxHeader:   TxHeaderFromProto(dproof.TargetTxHeader),
+		InclusionProof:   DigestsFromProto(dproof.InclusionProof),
+		ConsistencyProof: DigestsFromProto(dproof.ConsistencyProof),
 	}
 }
 
@@ -205,7 +251,14 @@ func TxMetadataFromProto(md *TxMetadata) *store.TxMetadata {
 		return nil
 	}
 
-	return &store.TxMetadata{}
+	txmd := store.NewTxMetadata()
+	if md.TruncatedTxID > 0 {
+		txmd.WithTruncatedTxID(md.TruncatedTxID)
+	}
+
+	txmd.WithExtra(md.Extra)
+
+	return txmd
 }
 
 func LinearProofFromProto(lproof *LinearProof) *store.LinearProof {
@@ -213,6 +266,22 @@ func LinearProofFromProto(lproof *LinearProof) *store.LinearProof {
 		SourceTxID: lproof.SourceTxId,
 		TargetTxID: lproof.TargetTxId,
 		Terms:      DigestsFromProto(lproof.Terms),
+	}
+}
+
+func LinearAdvanceProofFromProto(laproof *LinearAdvanceProof) *store.LinearAdvanceProof {
+	if laproof == nil {
+		return nil
+	}
+
+	inclusionProofs := make([][][sha256.Size]byte, len(laproof.InclusionProofs))
+	for i, proof := range laproof.InclusionProofs {
+		inclusionProofs[i] = DigestsFromProto(proof.Terms)
+	}
+
+	return &store.LinearAdvanceProof{
+		LinearProofTerms: DigestsFromProto(laproof.LinearProofTerms),
+		InclusionProofs:  inclusionProofs,
 	}
 }
 

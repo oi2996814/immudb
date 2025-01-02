@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,9 +26,11 @@ import (
 	"github.com/codenotary/immudb/pkg/auth"
 	"github.com/codenotary/immudb/pkg/client"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
+	"github.com/rs/xid"
 	"google.golang.org/grpc"
 
 	"github.com/codenotary/immudb/pkg/server"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -46,6 +48,7 @@ type BufconnServer struct {
 	GrpcServer *grpc.Server
 	Dialer     BuffDialer
 	quit       chan struct{}
+	uuid       xid.ID
 }
 
 // NewBuffconnServer creates new test server instance that uses grpc's buffconn connection method
@@ -53,33 +56,47 @@ type BufconnServer struct {
 func NewBufconnServer(options *server.Options) *BufconnServer {
 	options.Port = 0
 	immuserver := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	uuid := xid.New()
+
 	bs := &BufconnServer{
-		quit:    make(chan struct{}),
-		Lis:     bufconn.Listen(bufSize),
-		Options: options,
-		GrpcServer: grpc.NewServer(
-			grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(server.ErrorMapper, immuserver.KeepAliveSessionInterceptor, auth.ServerUnaryInterceptor, immuserver.SessionAuthInterceptor)),
-			grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(server.ErrorMapperStream, immuserver.KeepALiveSessionStreamInterceptor, auth.ServerStreamInterceptor)),
-		),
+		quit:       make(chan struct{}),
+		Lis:        bufconn.Listen(bufSize),
+		Options:    options,
 		immuServer: immuserver,
 		Server:     &ServerMock{Srv: immuserver},
+		uuid:       uuid,
 	}
 
 	return bs
 }
 
+func (bs *BufconnServer) GetUUID() xid.ID {
+	return bs.uuid
+}
+
+func (bs *BufconnServer) SetUUID(id xid.ID) {
+	bs.uuid = id
+}
+
 func (bs *BufconnServer) setupGrpcServer() {
+	uuidContext := server.NewUUIDContext(bs.uuid)
+
 	bs.GrpcServer = grpc.NewServer(
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			server.ErrorMapper,
 			bs.immuServer.KeepAliveSessionInterceptor,
+			uuidContext.UUIDContextSetter,
 			auth.ServerUnaryInterceptor,
 			bs.immuServer.SessionAuthInterceptor,
+			bs.immuServer.InjectRequestMetadataUnaryInterceptor,
 		)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			server.ErrorMapperStream,
 			bs.immuServer.KeepALiveSessionStreamInterceptor,
+			uuidContext.UUIDStreamContextSetter,
 			auth.ServerStreamInterceptor,
+			bs.immuServer.InjectRequestMetadataStreamInterceptor,
 		)),
 	)
 }
@@ -127,8 +144,11 @@ func (bs *BufconnServer) Stop() error {
 	if err := bs.Server.Srv.CloseDatabases(); err != nil {
 		return err
 	}
-	if err := bs.Server.Srv.PgsqlSrv.Stop(); err != nil {
-		return err
+
+	if bs.Server.Srv.PgsqlSrv != nil {
+		if err := bs.Server.Srv.PgsqlSrv.Stop(); err != nil {
+			return err
+		}
 	}
 
 	if bs.GrpcServer != nil {
@@ -147,7 +167,7 @@ func (bs *BufconnServer) WaitForPgsqlListener() {
 
 func (bs *BufconnServer) NewClient(options *client.Options) client.ImmuClient {
 	return client.NewClient().WithOptions(
-		options.WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure()}),
+		options.WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials())}),
 	)
 }
 
@@ -160,7 +180,6 @@ func (bs *BufconnServer) NewAuthenticatedClient(options *client.Options) (client
 		[]byte(bs.Server.Srv.Options.AdminPassword),
 		bs.Server.Srv.Options.GetDefaultDBName(),
 	)
-
 	if err != nil {
 		return nil, err
 	}

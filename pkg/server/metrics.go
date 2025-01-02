@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"expvar"
 	"net/http"
@@ -28,7 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"google.golang.org/grpc/peer"
 
-	"github.com/codenotary/immudb/pkg/logger"
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -59,12 +60,22 @@ type MetricsCollection struct {
 	LastMessageAtPerClientGauges *prometheus.GaugeVec
 
 	RemoteStorageKind *prometheus.GaugeVec
+
+	computeLoadedDBSize func() float64
+	LoadedDatabases     prometheus.Gauge
+
+	computeSessionCount func() float64
+	ActiveSessions      prometheus.Gauge
 }
 
 var metricsNamespace = "immudb"
 
 // WithUptimeCounter ...
 func (mc *MetricsCollection) WithUptimeCounter(f func() float64) {
+	if mc.UptimeCounter != nil {
+		return
+	}
+
 	mc.UptimeCounter = promauto.NewCounterFunc(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
@@ -97,6 +108,16 @@ func (mc *MetricsCollection) WithComputeDBEntries(f func() map[string]float64) {
 	mc.computeDBEntries = f
 }
 
+// WithLoadedDBSize ...
+func (mc *MetricsCollection) WithLoadedDBSize(f func() float64) {
+	mc.computeLoadedDBSize = f
+}
+
+// WithLoadedDBSize ...
+func (mc *MetricsCollection) WithComputeSessionCount(f func() float64) {
+	mc.computeSessionCount = f
+}
+
 // UpdateDBMetrics ...
 func (mc *MetricsCollection) UpdateDBMetrics() {
 	if mc.computeDBSizes != nil {
@@ -108,6 +129,12 @@ func (mc *MetricsCollection) UpdateDBMetrics() {
 		for db, nbEntries := range mc.computeDBEntries() {
 			mc.DBEntriesGauges.WithLabelValues(db).Set(nbEntries)
 		}
+	}
+	if mc.computeLoadedDBSize != nil {
+		mc.LoadedDatabases.Set(mc.computeLoadedDBSize())
+	}
+	if mc.computeSessionCount != nil {
+		mc.ActiveSessions.Set(mc.computeSessionCount())
 	}
 }
 
@@ -153,6 +180,20 @@ var Metrics = MetricsCollection{
 		},
 		[]string{"db", "kind"},
 	),
+	LoadedDatabases: promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metricsNamespace,
+			Name:      "loaded_databases",
+			Help:      "Numer of loaded databases",
+		},
+	),
+	ActiveSessions: promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: metricsNamespace,
+			Name:      "active_sessions",
+			Help:      "Numer of active sessions",
+		},
+	),
 }
 
 // StartMetrics listens and servers the HTTP metrics server in a new goroutine.
@@ -160,16 +201,20 @@ var Metrics = MetricsCollection{
 func StartMetrics(
 	updateInterval time.Duration,
 	addr string,
+	tlsConfig *tls.Config,
 	l logger.Logger,
 	uptimeCounter func() float64,
 	computeDBSizes func() map[string]float64,
 	computeDBEntries func() map[string]float64,
+	computeLoadedDBSize func() float64,
+	computeSessionCount func() float64,
 	addPProf bool,
 ) *http.Server {
-
 	Metrics.WithUptimeCounter(uptimeCounter)
 	Metrics.WithComputeDBSizes(computeDBSizes)
 	Metrics.WithComputeDBEntries(computeDBEntries)
+	Metrics.WithLoadedDBSize(computeLoadedDBSize)
+	Metrics.WithComputeSessionCount(computeSessionCount)
 
 	go func() {
 		Metrics.UpdateDBMetrics()
@@ -192,19 +237,26 @@ func StartMetrics(
 	mux.HandleFunc("/readyz", corsHandlerFunc(ImmudbHealthHandlerFunc()))
 	mux.HandleFunc("/livez", corsHandlerFunc(ImmudbHealthHandlerFunc()))
 	mux.HandleFunc("/version", corsHandlerFunc(ImmudbVersionHandlerFunc))
+
 	server := &http.Server{Addr: addr, Handler: mux}
+	server.TLSConfig = tlsConfig
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil {
-			if err == http.ErrServerClosed {
-				l.Debugf("Metrics http server closed")
-			} else {
-				l.Errorf("Metrics error: %s", err)
-			}
+		var err error
+		if tlsConfig != nil && len(tlsConfig.Certificates) > 0 {
+			l.Infof("metrics server enabled on %s (https)", addr)
+			err = server.ListenAndServeTLS("", "")
+		} else {
+			l.Infof("metrics server enabled on %s (http)", addr)
+			err = server.ListenAndServe()
+		}
 
+		if err == http.ErrServerClosed {
+			l.Debugf("Metrics http server closed")
+		} else {
+			l.Errorf("Metrics error: %s", err)
 		}
 	}()
-
 	return server
 }
 

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,6 +32,7 @@ var (
 	ErrIllegalArguments            = status.Error(codes.InvalidArgument, database.ErrIllegalArguments.Error())
 	ErrIllegalState                = status.Error(codes.InvalidArgument, database.ErrIllegalState.Error())
 	ErrEmptyAdminPassword          = status.Error(codes.InvalidArgument, "Admin password cannot be empty")
+	ErrCantUpdateAdminPassword     = errors.New("can not update sysadmin password")
 	ErrUserNotActive               = "user is not active"
 	ErrInvalidUsernameOrPassword   = "invalid user name or password"
 	ErrAuthDisabled                = "server is running with authentication disabled, please enable authentication to login"
@@ -53,6 +54,9 @@ var (
 	ErrReadWriteTxNotOngoing       = errors.New("read write transaction not ongoing")
 	ErrTxReadConflict              = errors.New(store.ErrTxReadConflict.Error()).WithCode(errors.CodInFailedSqlTransaction)
 	ErrDatabaseAlreadyLoaded       = errors.New("database already loaded")
+	ErrTruncatorNotNeeded          = errors.New("truncator is not needed")
+	ErrTruncatorNotInProgress      = errors.New("truncation is not in progress")
+	ErrTruncatorDoesNotExist       = errors.New("truncator does not exist")
 )
 
 func mapServerError(err error) error {

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,14 +23,17 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/codenotary/immudb/embedded/remotestorage"
 	"github.com/codenotary/immudb/embedded/remotestorage/memory"
 	"github.com/codenotary/immudb/embedded/remotestorage/s3"
 	"github.com/codenotary/immudb/embedded/store"
+	"github.com/codenotary/immudb/embedded/tbtree"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/auth"
+	"github.com/rs/xid"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
@@ -71,6 +74,14 @@ func (r *remoteStorageMockingWrapper) Put(ctx context.Context, name string, file
 	return r.wrapped.Put(ctx, name, fileName)
 }
 
+func (r *remoteStorageMockingWrapper) Remove(ctx context.Context, name string) error {
+	return nil
+}
+
+func (r *remoteStorageMockingWrapper) RemoveAll(ctx context.Context, folder string) error {
+	return nil
+}
+
 func (r *remoteStorageMockingWrapper) Exists(ctx context.Context, name string) (bool, error) {
 	if r.fnExists != nil {
 		return r.fnExists(ctx, name, func() (bool, error) {
@@ -90,9 +101,7 @@ func (r *remoteStorageMockingWrapper) ListEntries(ctx context.Context, path stri
 }
 
 func TestCreateRemoteStorage(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -139,9 +148,7 @@ func storeData(t *testing.T, s remotestorage.Storage, name string, data []byte) 
 }
 
 func TestInitializeRemoteStorageNoRemoteStorage(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -149,14 +156,12 @@ func TestInitializeRemoteStorageNoRemoteStorage(t *testing.T) {
 
 	s.WithOptions(opts)
 
-	err = s.initializeRemoteStorage(nil)
+	err := s.initializeRemoteStorage(nil)
 	require.NoError(t, err)
 }
 
 func TestInitializeRemoteStorageEmptyRemoteStorage(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -164,16 +169,15 @@ func TestInitializeRemoteStorageEmptyRemoteStorage(t *testing.T) {
 
 	s.WithOptions(opts)
 
-	err = s.initializeRemoteStorage(memory.Open())
+	err := s.initializeRemoteStorage(memory.Open())
 	require.NoError(t, err)
 }
 
 func TestInitializeRemoteStorageEmptyRemoteStorageErrorOnExists(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
-	opts := DefaultOptions().WithDir(dir)
+	remoteStorageOpts := DefaultRemoteStorageOptions().WithS3ExternalIdentifier(true)
+	opts := DefaultOptions().WithDir(dir).WithRemoteStorageOptions(remoteStorageOpts)
 
 	s := DefaultServer()
 
@@ -187,14 +191,12 @@ func TestInitializeRemoteStorageEmptyRemoteStorageErrorOnExists(t *testing.T) {
 		},
 	}
 
-	err = s.initializeRemoteStorage(mem)
-	require.True(t, errors.Is(err, injectedErr))
+	err := s.initializeRemoteStorage(mem)
+	require.ErrorIs(t, err, injectedErr)
 }
 
 func TestInitializeRemoteStorageEmptyRemoteStorageErrorOnListEntries(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -210,25 +212,26 @@ func TestInitializeRemoteStorageEmptyRemoteStorageErrorOnListEntries(t *testing.
 		},
 	}
 
-	err = s.initializeRemoteStorage(mem)
+	err := s.initializeRemoteStorage(mem)
 	require.True(t, errors.Is(err, injectedErr))
 }
 
 func TestInitializeRemoteStorageDownloadIdentifier(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
-	opts := DefaultOptions().WithDir(dir)
+	remoteStorageOpts := DefaultRemoteStorageOptions().WithS3ExternalIdentifier(true)
+	opts := DefaultOptions().WithDir(dir).WithRemoteStorageOptions(remoteStorageOpts)
 
 	s := DefaultServer()
 
 	s.WithOptions(opts)
 
-	m := memory.Open()
-	storeData(t, m, "immudb.identifier", []byte{1, 2, 3, 4, 5})
+	uuid := xid.New()
 
-	err = s.initializeRemoteStorage(m)
+	m := memory.Open()
+	storeData(t, m, "immudb.identifier", uuid.Bytes())
+
+	err := s.initializeRemoteStorage(m)
 	require.NoError(t, err)
 
 	uuidFilename := filepath.Join(dir, "immudb.identifier")
@@ -237,15 +240,72 @@ func TestInitializeRemoteStorageDownloadIdentifier(t *testing.T) {
 
 	id, err := ioutil.ReadFile(uuidFilename)
 	require.NoError(t, err)
-	require.Equal(t, []byte{1, 2, 3, 4, 5}, id)
+	require.Equal(t, uuid.Bytes(), id)
+}
+
+func TestInitializeWithEmptyRemoteStorage(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := DefaultOptions().WithDir(dir)
+	opts.RemoteStorageOptions.S3ExternalIdentifier = true
+
+	s := DefaultServer()
+
+	s.WithOptions(opts)
+
+	err := s.Initialize()
+	require.ErrorIs(t, err, ErrNoStorageForIdentifier)
+}
+
+func TestInitializeWithRemoteStorageWithoutIdentifier(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := DefaultOptions().WithDir(dir)
+	opts.RemoteStorageOptions.S3ExternalIdentifier = true
+
+	s := DefaultServer()
+
+	s.WithOptions(opts)
+
+	var m remotestorage.Storage = nil
+
+	err := s.initializeRemoteStorage(m)
+	require.ErrorIs(t, err, ErrNoStorageForIdentifier)
+}
+
+func TestInitializeRemoteStorageWithoutLocalIdentifier(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := DefaultOptions().WithDir(dir)
+	opts.RemoteStorageOptions.S3ExternalIdentifier = true
+
+	s := DefaultServer()
+
+	s.WithOptions(opts)
+
+	uuid := xid.New()
+
+	m := memory.Open()
+	storeData(t, m, "immudb.identifier", uuid.Bytes())
+	s.remoteStorage = m
+
+	err := s.initializeRemoteStorage(m)
+	require.NoError(t, err)
+
+	uuidFilename := filepath.Join(dir, "immudb.identifier")
+
+	require.FileExists(t, uuidFilename)
+
+	id, err := ioutil.ReadFile(uuidFilename)
+	require.NoError(t, err)
+	require.Equal(t, uuid.Bytes(), id)
 }
 
 func TestInitializeRemoteStorageDownloadIdentifierErrorOnGet(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
-	opts := DefaultOptions().WithDir(dir)
+	remoteStorageOpts := DefaultRemoteStorageOptions().WithS3ExternalIdentifier(true)
+	opts := DefaultOptions().WithDir(dir).WithRemoteStorageOptions(remoteStorageOpts)
 
 	s := DefaultServer()
 
@@ -261,18 +321,23 @@ func TestInitializeRemoteStorageDownloadIdentifierErrorOnGet(t *testing.T) {
 
 	storeData(t, m, "immudb.identifier", []byte{1, 2, 3, 4, 5})
 
-	err = s.initializeRemoteStorage(m)
+	err := s.initializeRemoteStorage(m)
 	require.True(t, errors.Is(err, injectedErr))
 }
 
 func TestInitializeRemoteStorageDownloadIdentifierErrorOnStore(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(t.TempDir(), "data_uuiderr", "immudb.identifier"), 0777))
 
+	remoteStorageOpts := DefaultRemoteStorageOptions().WithS3ExternalIdentifier(true)
+	opts := DefaultOptions().WithRemoteStorageOptions(remoteStorageOpts)
+
 	s := DefaultServer()
+	s.WithOptions(opts)
+
 	m := memory.Open()
 	storeData(t, m, "immudb.identifier", []byte{1, 2, 3, 4, 5})
 	err := s.initializeRemoteStorage(m)
-	require.Error(t, err)
+	require.ErrorIs(t, err, syscall.ENOENT)
 }
 
 type errReader struct {
@@ -284,11 +349,10 @@ func (e errReader) Read([]byte) (int, error) {
 }
 
 func TestInitializeRemoteStorageDownloadIdentifierErrorOnRead(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
-	opts := DefaultOptions().WithDir(dir)
+	remoteStorageOpts := DefaultRemoteStorageOptions().WithS3ExternalIdentifier(true)
+	opts := DefaultOptions().WithDir(dir).WithRemoteStorageOptions(remoteStorageOpts)
 
 	s := DefaultServer()
 
@@ -304,16 +368,15 @@ func TestInitializeRemoteStorageDownloadIdentifierErrorOnRead(t *testing.T) {
 
 	storeData(t, m, "immudb.identifier", []byte{1, 2, 3, 4, 5})
 
-	err = s.initializeRemoteStorage(m)
+	err := s.initializeRemoteStorage(m)
 	require.True(t, errors.Is(err, injectedErr))
 }
 
 func TestInitializeRemoteStorageIdentifierMismatch(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
-	opts := DefaultOptions().WithDir(dir)
+	remoteStorageOpts := DefaultRemoteStorageOptions().WithS3ExternalIdentifier(true)
+	opts := DefaultOptions().WithDir(dir).WithRemoteStorageOptions(remoteStorageOpts)
 
 	s := DefaultServer()
 
@@ -322,17 +385,15 @@ func TestInitializeRemoteStorageIdentifierMismatch(t *testing.T) {
 	m := memory.Open()
 	storeData(t, m, "immudb.identifier", []byte{1, 2, 3, 4, 5})
 
-	_, err = getOrSetUUID(dir, dir)
+	_, err := getOrSetUUID(dir, dir, false)
 	require.NoError(t, err)
 
 	err = s.initializeRemoteStorage(m)
-	require.Equal(t, ErrRemoteStorageDoesNotMatch, err)
+	require.ErrorIs(t, err, ErrRemoteStorageDoesNotMatch)
 }
 
 func TestInitializeRemoteStorageCreateLocalDirs(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -346,7 +407,7 @@ func TestInitializeRemoteStorageCreateLocalDirs(t *testing.T) {
 	storeData(t, m, "dir2/file3", []byte{1, 2, 3})
 	storeData(t, m, "dir3/file4", []byte{1, 2, 3})
 
-	err = s.initializeRemoteStorage(m)
+	err := s.initializeRemoteStorage(m)
 	require.NoError(t, err)
 
 	require.DirExists(t, filepath.Join(dir, "dir1"))
@@ -355,9 +416,7 @@ func TestInitializeRemoteStorageCreateLocalDirs(t *testing.T) {
 }
 
 func TestInitializeRemoteStorageCreateLocalDirsError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -371,17 +430,15 @@ func TestInitializeRemoteStorageCreateLocalDirsError(t *testing.T) {
 	storeData(t, m, "dir2/file3", []byte{1, 2, 3})
 	storeData(t, m, "dir3/file4", []byte{1, 2, 3})
 
-	err = ioutil.WriteFile(filepath.Join(dir, "dir3"), []byte{}, 0777)
+	err := ioutil.WriteFile(filepath.Join(dir, "dir3"), []byte{}, 0777)
 	require.NoError(t, err)
 
 	err = s.initializeRemoteStorage(m)
-	require.Error(t, err)
+	require.ErrorIs(t, err, syscall.ENOTDIR)
 }
 
 func TestUpdateRemoteUUID(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -391,7 +448,7 @@ func TestUpdateRemoteUUID(t *testing.T) {
 
 	m := memory.Open()
 
-	uuid, err := getOrSetUUID(dir, dir)
+	uuid, err := getOrSetUUID(dir, dir, false)
 	require.NoError(t, err)
 	s.UUID = uuid
 
@@ -410,10 +467,12 @@ func TestUpdateRemoteUUID(t *testing.T) {
 	require.Equal(t, uuid.Bytes(), readUUID)
 }
 
-func TestStoreOptionsForDBWithRemoteStorage(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+func TestAppendableIsUploadedToRemoteStorage(t *testing.T) {
+	testAppendableIsUploadedToRemoteStorage(t)
+}
+
+func testAppendableIsUploadedToRemoteStorage(t *testing.T) (string, remotestorage.Storage, *store.Options) {
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -423,23 +482,30 @@ func TestStoreOptionsForDBWithRemoteStorage(t *testing.T) {
 
 	s.remoteStorage = memory.Open()
 
-	stOpts := s.databaseOptionsFrom(s.defaultDBOptions("testdb")).GetStoreOptions()
+	stOpts := s.databaseOptionsFrom(s.defaultDBOptions("testdb", "")).GetStoreOptions().WithEmbeddedValues(false)
 
-	st, err := store.Open(filepath.Join(dir, "testdb"), stOpts)
+	path := filepath.Join(dir, "testdb")
+	st, err := store.Open(path, stOpts)
 	require.NoError(t, err)
 
-	tx, err := st.NewWriteOnlyTx()
+	tx, err := st.NewWriteOnlyTx(context.Background())
 	require.NoError(t, err)
 
 	err = tx.Set([]byte{1}, nil, []byte{2})
 	require.NoError(t, err)
 
-	_, err = tx.Commit()
+	_, err = tx.Commit(context.Background())
 	require.NoError(t, err)
 
 	err = st.Close()
 	require.NoError(t, err)
 
+	requireDataExistsOnRemoteStorage(t, s.remoteStorage)
+
+	return path, s.remoteStorage, stOpts
+}
+
+func requireDataExistsOnRemoteStorage(t *testing.T, storage remotestorage.Storage) {
 	// Ensure the data was written to the remote storage
 	for _, name := range []string{
 		"testdb/aht/commit/00000000.di",
@@ -453,27 +519,44 @@ func TestStoreOptionsForDBWithRemoteStorage(t *testing.T) {
 		"testdb/val_0/00000000.val",
 	} {
 		t.Run(name, func(t *testing.T) {
-			exists, err := s.remoteStorage.Exists(context.Background(), name)
+			exists, err := storage.Exists(context.Background(), name)
 			require.NoError(t, err)
 			require.True(t, exists)
 		})
 	}
 }
 
-func TestRemoteStorageUsedForNewDB(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
+func TestIndexCompactionForRemoteStorage(t *testing.T) {
+	path, storage, stOpts := testAppendableIsUploadedToRemoteStorage(t)
+
+	st, err := store.Open(path, stOpts.WithIndexOptions(stOpts.IndexOpts.WithCompactionThld(1)))
 	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+
+	err = st.CompactIndexes()
+	require.NoError(t, err)
+
+	err = st.Close()
+	require.NoError(t, err)
+
+	entries, subpath, err := storage.ListEntries(context.Background(), "testdb/index/")
+	require.NoError(t, err)
+	require.Len(t, entries, 0)
+	require.Equal(t, subpath, []string{"commit0000000000000001", "history", "nodes0000000000000001"})
+}
+
+func TestRemoteStorageUsedForNewDB(t *testing.T) {
+	dir := t.TempDir()
 
 	s := DefaultServer()
 
 	s.WithOptions(DefaultOptions().
 		WithDir(dir).
 		WithPort(0).
+		WithPgsqlServer(false).
 		WithListener(bufconn.Listen(1024 * 1024)),
 	)
 
-	err = s.Initialize()
+	err := s.Initialize()
 	require.NoError(t, err)
 
 	m := memory.Open()
@@ -496,6 +579,17 @@ func TestRemoteStorageUsedForNewDB(t *testing.T) {
 
 	_, err = s.CreateDatabaseWith(ctx, newdb)
 	require.NoError(t, err)
+
+	// force db loading
+	repl, err := s.UseDatabase(ctx, &schema.Database{DatabaseName: "newdb"})
+	require.NoError(t, err)
+
+	md = metadata.Pairs("authorization", repl.Token)
+	ctx = metadata.NewIncomingContext(context.Background(), md)
+
+	_, err = s.Get(ctx, &schema.KeyRequest{Key: []byte("test-key")})
+	require.ErrorIs(t, err, tbtree.ErrKeyNotFound)
+
 	err = s.CloseDatabases()
 	require.NoError(t, err)
 

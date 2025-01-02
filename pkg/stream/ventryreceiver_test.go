@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ package stream
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"testing"
 
@@ -51,12 +50,12 @@ func TestVEntryStreamReceiver_Next(t *testing.T) {
 
 func TestVEntryStreamReceiver_NextErr0(t *testing.T) {
 	me := []*streamtest.MsgError{
-		{M: []byte(`first`), E: errors.New("custom")},
+		{M: []byte(`first`), E: errCustom},
 	}
 	r := streamtest.DefaultMsgReceiverMock(me)
 	vsr := NewVEntryStreamReceiver(r, 4096)
 	entryWithoutValueProto, verifiableTxProto, inclusionProofProto, vr, err := vsr.Next()
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 	require.Nil(t, entryWithoutValueProto)
 	require.Nil(t, verifiableTxProto)
 	require.Nil(t, inclusionProofProto)
@@ -66,12 +65,12 @@ func TestVEntryStreamReceiver_NextErr0(t *testing.T) {
 func TestVEntryStreamReceiver_NextErr1(t *testing.T) {
 	me := []*streamtest.MsgError{
 		{M: []byte(`first`), E: io.EOF},
-		{M: []byte(`second`), E: errors.New("custom")},
+		{M: []byte(`second`), E: errCustom},
 	}
 	r := streamtest.DefaultMsgReceiverMock(me)
 	vsr := NewVEntryStreamReceiver(r, 4096)
 	entryWithoutValueProto, verifiableTxProto, inclusionProofProto, vr, err := vsr.Next()
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 	require.Nil(t, entryWithoutValueProto)
 	require.Nil(t, verifiableTxProto)
 	require.Nil(t, inclusionProofProto)
@@ -82,12 +81,12 @@ func TestVEntryStreamReceiver_NextErr2(t *testing.T) {
 	me := []*streamtest.MsgError{
 		{M: []byte(`first`), E: io.EOF},
 		{M: []byte(`second`), E: io.EOF},
-		{M: []byte(`third`), E: errors.New("custom")},
+		{M: []byte(`third`), E: errCustom},
 	}
 	r := streamtest.DefaultMsgReceiverMock(me)
 	vsr := NewVEntryStreamReceiver(r, 4096)
 	entryWithoutValueProto, verifiableTxProto, inclusionProofProto, vr, err := vsr.Next()
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 	require.Nil(t, entryWithoutValueProto)
 	require.Nil(t, verifiableTxProto)
 	require.Nil(t, inclusionProofProto)

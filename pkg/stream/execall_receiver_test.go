@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,6 +27,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 )
+
+var errCustom = errors.New("custom one")
 
 func TestNewExecAllStreamReceiver(t *testing.T) {
 	r := bytes.NewBuffer([]byte{})
@@ -78,7 +80,7 @@ func TestExecAllStreamReceiver_NextZAddUnmarshalError(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, op)
 	op, err = esr.Next()
-	require.Equal(t, ErrUnableToReassembleExecAllMessage, err.Error())
+	require.ErrorContains(t, err, ErrUnableToReassembleExecAllMessage)
 	require.Nil(t, op)
 }
 
@@ -90,29 +92,29 @@ func TestExecAllStreamReceiver_NextRefError(t *testing.T) {
 	r := streamtest.DefaultMsgReceiverMock(me)
 	esr := NewExecAllStreamReceiver(r, 4096)
 	op, err := esr.Next()
-	require.Equal(t, ErrRefOptNotImplemented, err.Error())
+	require.ErrorContains(t, err, ErrRefOptNotImplemented)
 	require.Nil(t, op)
 }
 
 func TestExecAllStreamReceiver_NextKvStreamerError(t *testing.T) {
 	me := []*streamtest.MsgError{
-		{M: []byte{TOp_Kv}, E: errors.New("custom one")},
+		{M: []byte{TOp_Kv}, E: errCustom},
 	}
 	r := streamtest.DefaultMsgReceiverMock(me)
 	esr := NewExecAllStreamReceiver(r, 4096)
 	op, err := esr.Next()
-	require.Error(t, err, err)
+	require.ErrorIs(t, err, errCustom)
 	require.Nil(t, op)
 }
 
 func TestExecAllStreamReceiver_NextKvStreamerNextError(t *testing.T) {
 	me := []*streamtest.MsgError{
 		{M: []byte{TOp_Kv}, E: io.EOF},
-		{M: []byte{4}, E: errors.New("custom one")},
+		{M: []byte{4}, E: errCustom},
 	}
 	r := streamtest.DefaultMsgReceiverMock(me)
 	esr := NewExecAllStreamReceiver(r, 4096)
 	op, err := esr.Next()
-	require.Error(t, err, err)
+	require.ErrorIs(t, err, errCustom)
 	require.Nil(t, op)
 }

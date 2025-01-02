@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,6 +34,7 @@ import (
 	"github.com/codenotary/immudb/embedded/appendable"
 	"github.com/codenotary/immudb/embedded/appendable/mocked"
 	"github.com/codenotary/immudb/embedded/appendable/multiapp"
+	"github.com/codenotary/immudb/embedded/appendable/singleapp"
 
 	"github.com/stretchr/testify/require"
 )
@@ -354,12 +355,14 @@ func monotonicInsertions(t *testing.T, tbtree *TBtree, itCount int, kCount int, 
 				require.Equal(t, expectedTs, ts1)
 
 				require.Equal(t, uint64(i), hc)
+
+				_, _, _, err := tbtree.GetBetween(k, 1, ts1)
+				require.NoError(t, err)
 			}
 
 			if j == kCount-1 {
-				exists, err := tbtree.ExistKeyWith(k, k)
-				require.NoError(t, err)
-				require.False(t, exists)
+				_, _, _, _, err := tbtree.GetWithPrefix(k, k)
+				require.ErrorIs(t, err, ErrKeyNotFound)
 			}
 
 			if i%2 == 1 {
@@ -446,11 +449,9 @@ func randomInsertions(t *testing.T, tbtree *TBtree, kCount int, override bool) {
 
 			for {
 				_, _, _, err = snapshot.Get(k)
-				if err == ErrKeyNotFound {
-
-					exists, err := tbtree.ExistKeyWith(k, nil)
-					require.NoError(t, err)
-					require.False(t, exists)
+				if errors.Is(err, ErrKeyNotFound) {
+					_, _, _, _, err := tbtree.GetWithPrefix(k, nil)
+					require.ErrorIs(t, err, ErrKeyNotFound)
 
 					break
 				}
@@ -469,9 +470,12 @@ func randomInsertions(t *testing.T, tbtree *TBtree, kCount int, override bool) {
 		err := tbtree.Insert(k, v)
 		require.NoError(t, err)
 
-		exists, err := tbtree.ExistKeyWith(k, nil)
+		k1, v1, ts1, hc1, err := tbtree.GetWithPrefix(k, nil)
 		require.NoError(t, err)
-		require.True(t, exists)
+		require.Equal(t, k, k1)
+		require.Equal(t, v, v1)
+		require.NotZero(t, ts1)
+		require.NotZero(t, hc1)
 
 		v0, ts0, hc0, err := tbtree.Get(k)
 		require.NoError(t, err)
@@ -491,7 +495,7 @@ func randomInsertions(t *testing.T, tbtree *TBtree, kCount int, override bool) {
 		snapshotTs := snapshot.Ts()
 		require.Equal(t, ts, snapshotTs)
 
-		v1, ts1, hc1, err := snapshot.Get(k)
+		v1, ts1, hc1, err = snapshot.Get(k)
 		require.NoError(t, err)
 		require.Equal(t, v, v1)
 		require.Equal(t, ts, ts1)
@@ -501,9 +505,9 @@ func randomInsertions(t *testing.T, tbtree *TBtree, kCount int, override bool) {
 			require.Equal(t, uint64(1), hc1)
 		}
 
-		tss, _, err := snapshot.History(k, 0, true, 1)
+		tvs, _, err := snapshot.History(k, 0, true, 1)
 		require.NoError(t, err)
-		require.Equal(t, ts, tss[0])
+		require.Equal(t, ts, tvs[0].Ts)
 
 		err = snapshot.Close()
 		require.NoError(t, err)
@@ -566,7 +570,7 @@ func TestSnapshotRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), snapc)
 
-	err = tree.BulkInsert([]*KV{
+	err = tree.BulkInsert([]*KVT{
 		{K: []byte("key1"), V: []byte("value1")},
 	})
 	require.NoError(t, err)
@@ -585,13 +589,13 @@ func TestSnapshotRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), snapc)
 
-	err = tree.BulkInsert([]*KV{
+	err = tree.BulkInsert([]*KVT{
 		{K: []byte("key2"), V: []byte("value2")},
 		{K: []byte("key3"), V: []byte("value3")},
 	})
 	require.NoError(t, err)
 
-	err = tree.BulkInsert([]*KV{
+	err = tree.BulkInsert([]*KVT{
 		{K: []byte("key4"), V: []byte("value4")},
 	})
 	require.NoError(t, err)
@@ -619,6 +623,8 @@ func TestSnapshotRecovery(t *testing.T) {
 	snapc, err = tree.SnapshotCount()
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), snapc)
+
+	require.Equal(t, uint64(3), tree.Ts())
 
 	err = tree.Close()
 	require.NoError(t, err)
@@ -691,7 +697,7 @@ func TestTBTreeSplitWithKeyUpdates(t *testing.T) {
 		key := make([]byte, opts.maxKeySize/4)
 		key[0] = i
 
-		err = tree.BulkInsert([]*KV{
+		err = tree.BulkInsert([]*KVT{
 			{K: key, V: make([]byte, 1)},
 		})
 		require.NoError(t, err)
@@ -702,7 +708,7 @@ func TestTBTreeSplitWithKeyUpdates(t *testing.T) {
 		key := make([]byte, opts.maxKeySize/4)
 		key[0] = i
 
-		err = tree.BulkInsert([]*KV{
+		err = tree.BulkInsert([]*KVT{
 			{K: key, V: key},
 		})
 		require.NoError(t, err)
@@ -726,7 +732,7 @@ func TestTBTreeSplitMultiLeafSplit(t *testing.T) {
 		key := make([]byte, opts.maxKeySize)
 		key[0] = i
 
-		err = tree.BulkInsert([]*KV{
+		err = tree.BulkInsert([]*KVT{
 			{K: key, V: make([]byte, 1)},
 		})
 		require.NoError(t, err)
@@ -736,7 +742,7 @@ func TestTBTreeSplitMultiLeafSplit(t *testing.T) {
 		key := make([]byte, opts.maxKeySize/8)
 		key[0] = i + 3
 
-		err = tree.BulkInsert([]*KV{
+		err = tree.BulkInsert([]*KVT{
 			{K: key, V: make([]byte, 1)},
 		})
 		require.NoError(t, err)
@@ -744,7 +750,7 @@ func TestTBTreeSplitMultiLeafSplit(t *testing.T) {
 
 	key := make([]byte, opts.maxKeySize)
 
-	err = tree.BulkInsert([]*KV{
+	err = tree.BulkInsert([]*KVT{
 		{K: key, V: make([]byte, opts.maxValueSize)},
 	})
 	require.NoError(t, err)
@@ -760,7 +766,7 @@ func TestTBTreeCompactionEdgeCases(t *testing.T) {
 	tree, err := Open(t.TempDir(), DefaultOptions())
 	require.NoError(t, err)
 
-	err = tree.BulkInsert([]*KV{{K: []byte("k0"), V: []byte("v0")}})
+	err = tree.BulkInsert([]*KVT{{K: []byte("k0"), V: []byte("v0")}})
 	require.NoError(t, err)
 
 	snap, err := tree.Snapshot()
@@ -877,7 +883,7 @@ func TestTBTreeHistory(t *testing.T) {
 	tbtree, err := Open(dir, opts)
 	require.NoError(t, err)
 
-	err = tbtree.BulkInsert([]*KV{{K: []byte("k0"), V: []byte("v0")}})
+	err = tbtree.BulkInsert([]*KVT{{K: []byte("k0"), V: []byte("v0")}})
 	require.NoError(t, err)
 
 	err = tbtree.Close()
@@ -886,7 +892,7 @@ func TestTBTreeHistory(t *testing.T) {
 	tbtree, err = Open(dir, opts)
 	require.NoError(t, err)
 
-	err = tbtree.BulkInsert([]*KV{{K: []byte("k0"), V: []byte("v00")}})
+	err = tbtree.BulkInsert([]*KVT{{K: []byte("k0"), V: []byte("v00")}})
 	require.NoError(t, err)
 
 	err = tbtree.Close()
@@ -919,7 +925,7 @@ func TestTBTreeInsertionInAscendingOrder(t *testing.T) {
 	err = tbtree.BulkInsert(nil)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	err = tbtree.BulkInsert([]*KV{{}})
+	err = tbtree.BulkInsert([]*KVT{{}})
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	_, _, err = tbtree.Flush()
@@ -931,9 +937,8 @@ func TestTBTreeInsertionInAscendingOrder(t *testing.T) {
 	_, _, err = tbtree.History([]byte("key"), 0, false, 0)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	exists, err := tbtree.ExistKeyWith([]byte("key"), []byte("longerkey"))
-	require.NoError(t, err)
-	require.False(t, exists)
+	_, _, _, _, err = tbtree.GetWithPrefix([]byte("key"), []byte("longerkey"))
+	require.ErrorIs(t, err, ErrKeyNotFound)
 
 	err = tbtree.Close()
 	require.NoError(t, err)
@@ -950,7 +955,10 @@ func TestTBTreeInsertionInAscendingOrder(t *testing.T) {
 	_, _, _, err = tbtree.Get([]byte("key"))
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
-	_, err = tbtree.ExistKeyWith([]byte("key"), nil)
+	_, _, _, err = tbtree.GetBetween([]byte("key"), 1, 2)
+	require.ErrorIs(t, err, ErrAlreadyClosed)
+
+	_, _, _, _, err = tbtree.GetWithPrefix([]byte("key"), nil)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = tbtree.Sync()
@@ -997,7 +1005,7 @@ func TestTBTreeInsertionInDescendingOrder(t *testing.T) {
 	require.NotNil(t, snapshot)
 	require.NoError(t, err)
 
-	rspec := &ReaderSpec{
+	rspec := ReaderSpec{
 		SeekKey:   []byte{},
 		Prefix:    nil,
 		DescOrder: false,
@@ -1075,7 +1083,7 @@ func TestRandomInsertionWithConcurrentReaderOrder(t *testing.T) {
 		require.NotNil(t, snapshot)
 		require.NoError(t, err)
 
-		rspec := &ReaderSpec{
+		rspec := ReaderSpec{
 			SeekKey:   []byte{},
 			Prefix:    nil,
 			DescOrder: false,
@@ -1118,7 +1126,11 @@ func TestRandomInsertionWithConcurrentReaderOrder(t *testing.T) {
 
 func TestTBTreeReOpen(t *testing.T) {
 	dir := t.TempDir()
-	tbtree, err := Open(dir, DefaultOptions())
+
+	opts := DefaultOptions().WithMaxKeySize(2).WithMaxValueSize(2)
+	opts.WithMaxNodeSize(requiredNodeSize(opts.maxKeySize, opts.maxValueSize))
+
+	tbtree, err := Open(dir, opts)
 	require.NoError(t, err)
 
 	err = tbtree.Insert([]byte("k0"), []byte("v0"))
@@ -1127,14 +1139,16 @@ func TestTBTreeReOpen(t *testing.T) {
 	_, _, err = tbtree.Flush()
 	require.NoError(t, err)
 
-	err = tbtree.Insert([]byte("k1"), []byte("v1"))
-	require.NoError(t, err)
+	for i := 1; i < 10; i++ {
+		err = tbtree.Insert([]byte(fmt.Sprintf("k%d", i)), []byte(fmt.Sprintf("v%d", i)))
+		require.NoError(t, err)
+	}
 
 	err = tbtree.Close()
 	require.NoError(t, err)
 
 	t.Run("reopening btree after gracefully close should read all data", func(t *testing.T) {
-		tbtree, err := Open(dir, DefaultOptions())
+		tbtree, err := Open(dir, opts)
 		require.NoError(t, err)
 
 		_, _, _, err = tbtree.Get([]byte("k0"))
@@ -1142,6 +1156,45 @@ func TestTBTreeReOpen(t *testing.T) {
 
 		_, _, _, err = tbtree.Get([]byte("k1"))
 		require.NoError(t, err)
+
+		root, isInnerNode := tbtree.root.(*innerNode)
+		require.True(t, isInnerNode)
+
+		childNodeRef := root.nodes[0].(*nodeRef)
+
+		require.False(t, childNodeRef.mutated())
+		require.Positive(t, childNodeRef.minOffset())
+		require.Positive(t, childNodeRef.offset())
+
+		sz, err := childNodeRef.size()
+		require.NoError(t, err)
+		require.Positive(t, sz)
+
+		_, err = childNodeRef.setTs(root.ts())
+		require.NoError(t, err)
+
+		childNodeRef.off = -1
+
+		_, _, err = childNodeRef.insert(nil)
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
+
+		_, _, _, err = childNodeRef.get(nil)
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
+
+		_, _, _, err = childNodeRef.getBetween(nil, 1, 1)
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
+
+		_, _, err = childNodeRef.history(nil, 0, true, 1)
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
+
+		_, _, _, err = childNodeRef.findLeafNode(nil, nil, 0, nil, true)
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
+
+		_, err = childNodeRef.setTs(root.ts())
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
+
+		_, err = childNodeRef.size()
+		require.ErrorIs(t, err, singleapp.ErrNegativeOffset)
 
 		err = tbtree.Close()
 		require.NoError(t, err)
@@ -1156,6 +1209,9 @@ func TestTBTreeSelfHealingHistory(t *testing.T) {
 	err = tbtree.Insert([]byte("k0"), []byte("v0"))
 	require.NoError(t, err)
 
+	err = tbtree.Insert([]byte("k0"), []byte("v00"))
+	require.NoError(t, err)
+
 	err = tbtree.Close()
 	require.NoError(t, err)
 
@@ -1164,7 +1220,7 @@ func TestTBTreeSelfHealingHistory(t *testing.T) {
 	tbtree, err = Open(dir, DefaultOptions())
 	require.NoError(t, err)
 
-	_, _, _, err = tbtree.Get([]byte("k0"))
+	_, _, err = tbtree.History([]byte("k0"), 0, true, 2)
 	require.ErrorIs(t, err, ErrKeyNotFound)
 
 	err = tbtree.Close()
@@ -1230,6 +1286,26 @@ func TestTBTreeIncreaseTs(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, uint64(3), tbtree.Ts())
+
+	for i := 1; i < 1_000; i++ {
+		err = tbtree.Insert([]byte(fmt.Sprintf("key%d", i)), []byte("v0"))
+		require.NoError(t, err)
+	}
+
+	err = tbtree.IncreaseTs(tbtree.Ts() - 1)
+	require.ErrorIs(t, err, ErrIllegalArguments)
+
+	err = tbtree.IncreaseTs(tbtree.Ts())
+	require.ErrorIs(t, err, ErrIllegalArguments)
+
+	err = tbtree.IncreaseTs(tbtree.Ts() + 1)
+	require.NoError(t, err)
+
+	err = tbtree.Insert([]byte(fmt.Sprintf("key%d", 1000)), []byte("v0"))
+	require.NoError(t, err)
+
+	err = tbtree.IncreaseTs(tbtree.Ts() + 1)
+	require.NoError(t, err)
 
 	err = tbtree.Close()
 	require.NoError(t, err)
@@ -1346,7 +1422,7 @@ func bulkInsert(tbtree *TBtree, bulkCount, bulkSize int, asc bool) error {
 	seed := rand.NewSource(time.Now().UnixNano())
 	rnd := rand.New(seed)
 
-	kvs := make([]*KV, bulkSize)
+	kvs := make([]*KVT, bulkSize)
 
 	for i := 0; i < bulkCount; i++ {
 		for j := 0; j < bulkSize; j++ {
@@ -1360,7 +1436,7 @@ func bulkInsert(tbtree *TBtree, bulkCount, bulkSize int, asc bool) error {
 			value := make([]byte, 32)
 			rnd.Read(value)
 
-			kvs[j] = &KV{K: key, V: value}
+			kvs[j] = &KVT{K: key, V: value}
 		}
 
 		err := tbtree.BulkInsert(kvs)
@@ -1389,17 +1465,17 @@ func BenchmarkRandomBulkInsertion(b *testing.B) {
 		kBulkCount := 1000
 		kBulkSize := 1000
 
-		kvs := make([]*KV, kBulkSize)
+		kvs := make([]*KVT, kBulkSize)
 
 		for i := 0; i < kBulkCount; i++ {
 			for j := 0; j < kBulkSize; j++ {
-				k := make([]byte, 8)
+				k := make([]byte, 32)
 				v := make([]byte, 32)
 
 				rnd.Read(k)
 				rnd.Read(v)
 
-				kvs[j] = &KV{K: k, V: v}
+				kvs[j] = &KVT{K: k, V: v}
 			}
 
 			err = tbtree.BulkInsert(kvs)
@@ -1426,15 +1502,174 @@ func TestLastUpdateBetween(t *testing.T) {
 	require.NotNil(t, leaf)
 	require.GreaterOrEqual(t, len(leaf.values), off)
 
-	_, _, err = leaf.values[off].lastUpdateBetween(nil, 1, 0)
+	_, _, _, err = leaf.values[off].lastUpdateBetween(nil, 1, 0)
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	for i := 0; i < keyUpdatesCount; i++ {
 		for f := i; f < keyUpdatesCount; f++ {
-			tx, hc, err := leaf.values[off].lastUpdateBetween(nil, uint64(i+1), uint64(f+1))
+			_, tx, hc, err := leaf.values[off].lastUpdateBetween(nil, uint64(i+1), uint64(f+1))
 			require.NoError(t, err)
-			require.Equal(t, uint64(f), hc)
+			require.Equal(t, uint64(f+1), hc)
 			require.Equal(t, uint64(f+1), tx)
 		}
 	}
+
+	err = tbtree.Close()
+	require.NoError(t, err)
+}
+
+func TestMultiTimedBulkInsertion(t *testing.T) {
+	tbtree, err := Open(t.TempDir(), DefaultOptions())
+	require.NoError(t, err)
+
+	t.Run("multi-timed bulk insertion should succeed", func(t *testing.T) {
+		currTs := tbtree.Ts()
+
+		kvts := []*KVT{
+			{K: []byte("key1_0"), V: []byte("value1_0")},
+			{K: []byte("key2_0"), V: []byte("value2_0")},
+			{K: []byte("key3_0"), V: []byte("value3_0"), T: currTs + 1},
+			{K: []byte("key4_0"), V: []byte("value4_0"), T: currTs + 1},
+			{K: []byte("key5_0"), V: []byte("value5_0"), T: currTs + 2},
+			{K: []byte("key6_0"), V: []byte("value6_0")},
+		}
+
+		err = tbtree.BulkInsert(kvts)
+		require.NoError(t, err)
+
+		for _, kvt := range kvts {
+			v, ts, hc, err := tbtree.Get(kvt.K)
+			require.NoError(t, err)
+			require.Equal(t, kvt.V, v)
+			require.Equal(t, uint64(1), hc)
+
+			if kvt.T == 0 {
+				//zero-valued timestamps should be associated with current time plus one
+				require.Equal(t, currTs+1, ts)
+			} else {
+				require.Equal(t, kvt.T, ts)
+			}
+		}
+
+		// root's ts should match the greatest inserted timestamp
+		require.Equal(t, currTs+2, tbtree.Ts())
+	})
+
+	t.Run("bulk-insertion of the same key should be possible with increasing timestamp", func(t *testing.T) {
+		currTs := tbtree.Ts()
+
+		kvts := []*KVT{
+			{K: []byte("key1_1"), V: []byte("value1_1")},
+			{K: []byte("key1_1"), V: []byte("value2_1"), T: currTs + 2},
+		}
+
+		err = tbtree.BulkInsert(kvts)
+		require.NoError(t, err)
+
+		v, ts, hc, err := tbtree.Get([]byte("key1_1"))
+		require.NoError(t, err)
+		require.Equal(t, []byte("value2_1"), v)
+		require.Equal(t, uint64(2), hc)
+		require.Equal(t, currTs+2, ts)
+
+		// root's ts should match the greatest inserted timestamp
+		require.Equal(t, currTs+2, tbtree.Ts())
+	})
+
+	t.Run("bulk-insertion of the same key should not be possible with non-increasing timestamp", func(t *testing.T) {
+		_, _, err = tbtree.Flush()
+		require.NoError(t, err)
+
+		initialTs := tbtree.Ts()
+
+		err = tbtree.Insert([]byte("key1_2"), []byte("key1_2"))
+		require.NoError(t, err)
+
+		currTs := tbtree.Ts()
+
+		kvts := []*KVT{
+			{K: []byte("key2_2"), V: []byte("value2_2"), T: currTs + 2},
+			{K: []byte("key2_2"), V: []byte("value3_2")},
+		}
+
+		err = tbtree.BulkInsert(kvts)
+		require.ErrorIs(t, err, ErrIllegalArguments)
+
+		// rollback to latest snapshot should be made if insertion fails
+		_, _, _, err := tbtree.Get([]byte("key1_2"))
+		require.ErrorIs(t, err, ErrKeyNotFound)
+
+		require.Equal(t, initialTs, tbtree.Ts())
+	})
+
+	t.Run("bulk-insertion of the same key timestamp equal to current timestamp of root should not be possible", func(t *testing.T) {
+		_, _, err = tbtree.Flush()
+		require.NoError(t, err)
+
+		err = tbtree.Insert([]byte("key3_1"), []byte("value3_1"))
+		require.NoError(t, err)
+
+		currTs := tbtree.Ts()
+
+		kvts := []*KVT{
+			{K: []byte("key3_2"), V: []byte("value3_2"), T: currTs},
+		}
+
+		err = tbtree.BulkInsert(kvts)
+		require.ErrorIs(t, err, ErrIllegalArguments)
+	})
+
+	err = tbtree.Close()
+	require.NoError(t, err)
+}
+
+func TestGetWithPrefix(t *testing.T) {
+	tbtree, err := Open(t.TempDir(), DefaultOptions())
+	require.NoError(t, err)
+
+	defer tbtree.Close()
+
+	key1 := []byte{1, 82, 46, 0, 0, 0, 1}
+	key2 := []byte{2, 82, 46, 0, 0, 0, 1}
+
+	err = tbtree.Insert(key1, []byte("value"))
+	require.NoError(t, err)
+
+	err = tbtree.Insert(key2, []byte("value"))
+	require.NoError(t, err)
+
+	t.Run("get with prefix over tbtree", func(t *testing.T) {
+		_, _, _, _, err = tbtree.GetWithPrefix(key1, key1)
+		require.ErrorIs(t, err, ErrKeyNotFound)
+
+		k, _, _, _, err := tbtree.GetWithPrefix(key1, nil)
+		require.NoError(t, err)
+		require.Equal(t, key1, k)
+
+		_, _, _, _, err = tbtree.GetWithPrefix(key2, key2)
+		require.ErrorIs(t, err, ErrKeyNotFound)
+
+		k, _, _, _, err = tbtree.GetWithPrefix(key2, nil)
+		require.NoError(t, err)
+		require.Equal(t, key2, k)
+	})
+
+	t.Run("get with prefix over a snapshot", func(t *testing.T) {
+		snap, err := tbtree.Snapshot()
+		require.NoError(t, err)
+
+		_, _, _, _, err = snap.GetWithPrefix(key1, key1)
+		require.ErrorIs(t, err, ErrKeyNotFound)
+
+		k, _, _, _, err := snap.GetWithPrefix(key1, nil)
+		require.NoError(t, err)
+		require.Equal(t, key1, k)
+
+		_, _, _, _, err = snap.GetWithPrefix(key2, key2)
+		require.ErrorIs(t, err, ErrKeyNotFound)
+
+		k, _, _, _, err = snap.GetWithPrefix(key2, nil)
+		require.NoError(t, err)
+		require.Equal(t, key2, k)
+	})
 }

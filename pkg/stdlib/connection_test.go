@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ import (
 	"github.com/codenotary/immudb/pkg/server/servertest"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestConn(t *testing.T) {
@@ -64,25 +65,25 @@ func TestConnErr(t *testing.T) {
 	}
 
 	_, err := c.Prepare("")
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotImplemented)
 
-	_, err = c.PrepareContext(context.TODO(), "")
-	require.Error(t, err)
+	_, err = c.PrepareContext(context.Background(), "")
+	require.ErrorIs(t, err, ErrNotImplemented)
 
 	_, err = c.Begin()
-	require.Error(t, err)
+	require.ErrorIs(t, err, driver.ErrBadConn)
 
-	_, err = c.BeginTx(context.TODO(), driver.TxOptions{})
-	require.Error(t, err)
+	_, err = c.BeginTx(context.Background(), driver.TxOptions{})
+	require.ErrorIs(t, err, driver.ErrBadConn)
 
-	_, err = c.ExecContext(context.TODO(), "", nil)
-	require.Error(t, err)
+	_, err = c.ExecContext(context.Background(), "", nil)
+	require.ErrorIs(t, err, driver.ErrBadConn)
 
-	_, err = c.QueryContext(context.TODO(), "", nil)
-	require.Error(t, err)
+	_, err = c.QueryContext(context.Background(), "", nil)
+	require.ErrorIs(t, err, driver.ErrBadConn)
 
-	err = c.ResetSession(context.TODO())
-	require.Error(t, err)
+	err = c.ResetSession(context.Background())
+	require.ErrorIs(t, err, driver.ErrBadConn)
 
 	ris := c.CheckNamedValue(nil)
 	require.Nil(t, ris)
@@ -101,19 +102,19 @@ func TestConn_QueryContextErr(t *testing.T) {
 	opts.Password = "immudb"
 	opts.Database = "defaultdb"
 
-	opts.WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure()})
+	opts.WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials())})
 
 	db := OpenDB(opts)
 	defer db.Close()
 
-	_, err := db.QueryContext(context.TODO(), "query", 10.5)
-	require.Error(t, err)
+	_, err := db.QueryContext(context.Background(), "query", 10.5)
+	require.ErrorContains(t, err, "syntax error: unexpected IDENTIFIER")
 
-	_, err = db.ExecContext(context.TODO(), "INSERT INTO myTable(id, name) VALUES (2, 'immu2')")
-	require.Error(t, err)
+	_, err = db.ExecContext(context.Background(), "INSERT INTO myTable(id, name) VALUES (2, 'immu2')")
+	require.ErrorContains(t, err, "table does not exist (mytable)")
 
-	_, err = db.QueryContext(context.TODO(), "SELECT * FROM myTable")
-	require.Error(t, err)
+	_, err = db.QueryContext(context.Background(), "SELECT * FROM myTable")
+	require.ErrorContains(t, err, "table does not exist (mytable)")
 }
 
 func TestConn_QueryContext(t *testing.T) {
@@ -138,7 +139,7 @@ func TestConn_QueryContext(t *testing.T) {
 	}
 
 	table := "mytable"
-	result, err := c.ExecContext(context.TODO(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", table), nil)
+	result, err := c.ExecContext(context.Background(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", table), nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -151,14 +152,14 @@ func TestConn_QueryContext(t *testing.T) {
 		{Name: "content", Value: binaryContent},
 		{Name: "isPresent", Value: true},
 	}
-	_, err = c.ExecContext(context.TODO(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table), argsV)
+	_, err = c.ExecContext(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table), argsV)
 	require.NoError(t, err)
 
 	rows, err := c.QueryContext(ctx, "SELECT * FROM myTable limit 1", nil)
 	require.NoError(t, err)
 	defer rows.Close()
 
-	dst := make([]driver.Value, 6, 6)
+	dst := make([]driver.Value, 6)
 	rows.Next(dst)
 
 	require.Equal(t, int64(1), dst[0])
@@ -191,7 +192,7 @@ func TestConn_QueryContextEmptyTable(t *testing.T) {
 	}
 
 	table := "emptytable"
-	result, err := c.ExecContext(context.TODO(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", table), nil)
+	result, err := c.ExecContext(context.Background(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", table), nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 
@@ -218,7 +219,7 @@ func TestConn_QueryContextEmptyTable(t *testing.T) {
 	opts.Password = "immudb"
 	opts.Database = "defaultdb"
 
-	opts.WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure()})
+	opts.WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials())})
 
 	db := OpenDB(opts)
 	defer db.Close()
@@ -229,6 +230,6 @@ func TestConn_QueryContextEmptyTable(t *testing.T) {
 
 	immuConn := conn.(driver.Pinger)
 
-	err = immuConn.Ping(context.TODO())
+	err = immuConn.Ping(context.Background())
 	require.NoError(t, err)
 }*/

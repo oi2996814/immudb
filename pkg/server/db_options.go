@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,9 @@ limitations under the License.
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,26 +39,33 @@ type dbOptions struct {
 	synced        bool         // currently a global immudb instance option
 	SyncFrequency Milliseconds `json:"syncFrequency"` // ms
 
-	// replication options
+	// replication options (field names must be kept for backwards compatibility)
 	Replica                      bool   `json:"replica"`
 	SyncReplication              bool   `json:"syncReplication"`
-	MasterDatabase               string `json:"masterDatabase"`
-	MasterAddress                string `json:"masterAddress"`
-	MasterPort                   int    `json:"masterPort"`
-	FollowerUsername             string `json:"followerUsername"`
-	FollowerPassword             string `json:"followerPassword"`
+	PrimaryDatabase              string `json:"masterDatabase"`
+	PrimaryHost                  string `json:"masterAddress"`
+	PrimaryPort                  int    `json:"masterPort"`
+	PrimaryUsername              string `json:"followerUsername"`
+	PrimaryPassword              string `json:"followerPassword"`
 	SyncAcks                     int    `json:"syncAcks"`
 	PrefetchTxBufferSize         int    `json:"prefetchTxBufferSize"`
 	ReplicationCommitConcurrency int    `json:"replicationCommitConcurrency"`
 	AllowTxDiscarding            bool   `json:"allowTxDiscarding"`
+	SkipIntegrityCheck           bool   `json:"skipIntegrityCheck"`
+	WaitForIndexing              bool   `json:"waitForIndexing"`
 
 	// store options
-	FileSize     int `json:"fileSize"`     // permanent
-	MaxKeyLen    int `json:"maxKeyLen"`    // permanent
-	MaxValueLen  int `json:"maxValueLen"`  // permanent
-	MaxTxEntries int `json:"maxTxEntries"` // permanent
+	EmbeddedValues bool `json:"embeddedValues"` // permanent
+	PreallocFiles  bool `json:"preallocFiles"`  // permanent
+	FileSize       int  `json:"fileSize"`       // permanent
+	MaxKeyLen      int  `json:"maxKeyLen"`      // permanent
+	MaxValueLen    int  `json:"maxValueLen"`    // permanent
+	MaxTxEntries   int  `json:"maxTxEntries"`   // permanent
 
 	ExcludeCommitTime bool `json:"excludeCommitTime"`
+
+	MaxActiveTransactions int `json:"maxActiveTransactions"`
+	MVCCReadSetLimit      int `json:"mvccReadSetLimit"`
 
 	MaxConcurrency   int `json:"maxConcurrency"`
 	MaxIOConcurrency int `json:"maxIOConcurrency"`
@@ -64,6 +73,7 @@ type dbOptions struct {
 	WriteBufferSize int `json:"writeBufferSize"`
 
 	TxLogCacheSize          int `json:"txLogCacheSize"`
+	VLogCacheSize           int `json:"vLogCacheSize"`
 	VLogMaxOpenedFiles      int `json:"vLogMaxOpenedFiles"`
 	TxLogMaxOpenedFiles     int `json:"txLogMaxOpenedFiles"`
 	CommitLogMaxOpenedFiles int `json:"commitLogMaxOpenedFiles"`
@@ -81,6 +91,9 @@ type dbOptions struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedBy string    `json:"updatedBy"`
 	UpdatedAt time.Time `json:"updatedAt"`
+
+	RetentionPeriod     Milliseconds `json:"retentionPeriod"`
+	TruncationFrequency Milliseconds `json:"truncationFrequency"` // ms
 }
 
 type featureState int
@@ -96,19 +109,21 @@ func (fs featureState) isEnabled() bool {
 }
 
 type indexOptions struct {
-	FlushThreshold           int     `json:"flushThreshold"`
-	SyncThreshold            int     `json:"syncThreshold"`
-	FlushBufferSize          int     `json:"flushBufferSize"`
-	CleanupPercentage        float32 `json:"cleanupPercentage"`
-	CacheSize                int     `json:"cacheSize"`
-	MaxNodeSize              int     `json:"maxNodeSize"` // permanent
-	MaxActiveSnapshots       int     `json:"maxActiveSnapshots"`
-	RenewSnapRootAfter       int64   `json:"renewSnapRootAfter"` // ms
-	CompactionThld           int     `json:"compactionThld"`
-	DelayDuringCompaction    int64   `json:"delayDuringCompaction"` // ms
-	NodesLogMaxOpenedFiles   int     `json:"nodesLogMaxOpenedFiles"`
-	HistoryLogMaxOpenedFiles int     `json:"historyLogMaxOpenedFiles"`
-	CommitLogMaxOpenedFiles  int     `json:"commitLogMaxOpenedFiles"`
+	FlushThreshold           int          `json:"flushThreshold"`
+	SyncThreshold            int          `json:"syncThreshold"`
+	FlushBufferSize          int          `json:"flushBufferSize"`
+	CleanupPercentage        float32      `json:"cleanupPercentage"`
+	CacheSize                int          `json:"cacheSize"`
+	MaxNodeSize              int          `json:"maxNodeSize"` // permanent
+	MaxActiveSnapshots       int          `json:"maxActiveSnapshots"`
+	RenewSnapRootAfter       int64        `json:"renewSnapRootAfter"` // ms
+	CompactionThld           int          `json:"compactionThld"`
+	DelayDuringCompaction    int64        `json:"delayDuringCompaction"` // ms
+	NodesLogMaxOpenedFiles   int          `json:"nodesLogMaxOpenedFiles"`
+	HistoryLogMaxOpenedFiles int          `json:"historyLogMaxOpenedFiles"`
+	CommitLogMaxOpenedFiles  int          `json:"commitLogMaxOpenedFiles"`
+	MaxBulkSize              int          `json:"maxBulkSize"`
+	BulkPreparationTimeout   Milliseconds `json:"bulkPreparationTimeout"` // ms
 }
 
 type ahtOptions struct {
@@ -116,27 +131,34 @@ type ahtOptions struct {
 	WriteBufferSize int `json:"writeBufferSize"`
 }
 
-const DefaultMaxValueLen = 1 << 25   //32Mb
-const DefaultStoreFileSize = 1 << 29 //512Mb
+const (
+	DefaultMaxValueLen   = 1 << 25 //32Mb
+	DefaultStoreFileSize = 1 << 29 //512Mb
+)
 
-func (s *ImmuServer) defaultDBOptions(dbName string) *dbOptions {
+func (s *ImmuServer) defaultDBOptions(dbName, userName string) *dbOptions {
 	dbOpts := &dbOptions{
 		Database: dbName,
 
 		synced:        s.Options.synced,
 		SyncFrequency: Milliseconds(store.DefaultSyncFrequency.Milliseconds()),
 
-		FileSize:     DefaultStoreFileSize,
-		MaxKeyLen:    store.DefaultMaxKeyLen,
-		MaxValueLen:  DefaultMaxValueLen,
-		MaxTxEntries: store.DefaultMaxTxEntries,
+		EmbeddedValues: store.DefaultEmbeddedValues,
+		PreallocFiles:  store.DefaultPreallocFiles,
+		FileSize:       DefaultStoreFileSize,
+		MaxKeyLen:      store.DefaultMaxKeyLen,
+		MaxValueLen:    DefaultMaxValueLen,
+		MaxTxEntries:   store.DefaultMaxTxEntries,
 
 		ExcludeCommitTime: false,
 
+		MaxActiveTransactions:   store.DefaultMaxActiveTransactions,
+		MVCCReadSetLimit:        store.DefaultMVCCReadSetLimit,
 		MaxConcurrency:          store.DefaultMaxConcurrency,
 		MaxIOConcurrency:        store.DefaultMaxIOConcurrency,
 		WriteBufferSize:         store.DefaultWriteBufferSize,
 		TxLogCacheSize:          store.DefaultTxLogCacheSize,
+		VLogCacheSize:           store.DefaultVLogCacheSize,
 		VLogMaxOpenedFiles:      store.DefaultVLogMaxOpenedFiles,
 		TxLogMaxOpenedFiles:     store.DefaultTxLogMaxOpenedFiles,
 		CommitLogMaxOpenedFiles: store.DefaultCommitLogMaxOpenedFiles,
@@ -149,7 +171,9 @@ func (s *ImmuServer) defaultDBOptions(dbName string) *dbOptions {
 
 		Autoload: unspecifiedState,
 
-		CreatedAt: time.Now(),
+		CreatedAt:           time.Now(),
+		CreatedBy:           userName,
+		TruncationFrequency: Milliseconds(database.DefaultTruncationFrequency.Milliseconds()),
 	}
 
 	if dbName == s.Options.systemAdminDBName || dbName == s.Options.defaultDBName {
@@ -160,14 +184,15 @@ func (s *ImmuServer) defaultDBOptions(dbName string) *dbOptions {
 		dbOpts.SyncReplication = repOpts.SyncReplication
 
 		if dbOpts.Replica {
-			dbOpts.MasterDatabase = dbOpts.Database // replica of systemdb and defaultdb must have the same name as in master
-			dbOpts.MasterAddress = repOpts.MasterAddress
-			dbOpts.MasterPort = repOpts.MasterPort
-			dbOpts.FollowerUsername = repOpts.FollowerUsername
-			dbOpts.FollowerPassword = repOpts.FollowerPassword
+			dbOpts.PrimaryDatabase = dbOpts.Database // replica of systemdb and defaultdb must have the same name as in primary
+			dbOpts.PrimaryHost = repOpts.PrimaryHost
+			dbOpts.PrimaryPort = repOpts.PrimaryPort
+			dbOpts.PrimaryUsername = repOpts.PrimaryUsername
+			dbOpts.PrimaryPassword = repOpts.PrimaryPassword
 			dbOpts.PrefetchTxBufferSize = repOpts.PrefetchTxBufferSize
 			dbOpts.ReplicationCommitConcurrency = repOpts.ReplicationCommitConcurrency
 			dbOpts.AllowTxDiscarding = repOpts.AllowTxDiscarding
+			dbOpts.SkipIntegrityCheck = repOpts.SkipIntegrityCheck
 		} else {
 			dbOpts.SyncAcks = repOpts.SyncAcks
 		}
@@ -191,6 +216,8 @@ func (s *ImmuServer) defaultIndexOptions() *indexOptions {
 		NodesLogMaxOpenedFiles:   tbtree.DefaultNodesLogMaxOpenedFiles,
 		HistoryLogMaxOpenedFiles: tbtree.DefaultHistoryLogMaxOpenedFiles,
 		CommitLogMaxOpenedFiles:  tbtree.DefaultCommitLogMaxOpenedFiles,
+		MaxBulkSize:              store.DefaultIndexingMaxBulkSize,
+		BulkPreparationTimeout:   Milliseconds(store.DefaultBulkPreparationTimeout.Milliseconds()),
 	}
 }
 
@@ -202,13 +229,16 @@ func (s *ImmuServer) defaultAHTOptions() *ahtOptions {
 }
 
 func (s *ImmuServer) databaseOptionsFrom(opts *dbOptions) *database.Options {
-	return database.DefaultOption().
+	return database.DefaultOptions().
 		WithDBRootPath(s.Options.Dir).
 		WithStoreOptions(s.storeOptionsForDB(opts.Database, s.remoteStorage, opts.storeOptions())).
 		AsReplica(opts.Replica).
 		WithSyncReplication(opts.SyncReplication).
 		WithSyncAcks(opts.SyncAcks).
-		WithReadTxPoolSize(opts.ReadTxPoolSize)
+		WithReadTxPoolSize(opts.ReadTxPoolSize).
+		WithRetentionPeriod(time.Millisecond * time.Duration(opts.RetentionPeriod)).
+		WithTruncationFrequency(time.Millisecond * time.Duration(opts.TruncationFrequency)).
+		WithMaxResultSize(s.Options.MaxResultSize)
 }
 
 func (opts *dbOptions) storeOptions() *store.Options {
@@ -228,7 +258,9 @@ func (opts *dbOptions) storeOptions() *store.Options {
 			WithDelayDuringCompaction(time.Millisecond * time.Duration(opts.IndexOptions.DelayDuringCompaction)).
 			WithNodesLogMaxOpenedFiles(opts.IndexOptions.NodesLogMaxOpenedFiles).
 			WithHistoryLogMaxOpenedFiles(opts.IndexOptions.HistoryLogMaxOpenedFiles).
-			WithCommitLogMaxOpenedFiles(opts.IndexOptions.CommitLogMaxOpenedFiles)
+			WithCommitLogMaxOpenedFiles(opts.IndexOptions.CommitLogMaxOpenedFiles).
+			WithMaxBulkSize(opts.IndexOptions.MaxBulkSize).
+			WithBulkPreparationTimeout(time.Millisecond * time.Duration(opts.IndexOptions.BulkPreparationTimeout))
 	}
 
 	ahtOpts := store.DefaultAHTOptions()
@@ -239,6 +271,8 @@ func (opts *dbOptions) storeOptions() *store.Options {
 	}
 
 	stOpts := store.DefaultOptions().
+		WithEmbeddedValues(opts.EmbeddedValues).
+		WithPreallocFiles(opts.PreallocFiles).
 		WithSynced(opts.synced).
 		WithSyncFrequency(time.Millisecond * time.Duration(opts.SyncFrequency)).
 		WithFileSize(opts.FileSize).
@@ -246,14 +280,16 @@ func (opts *dbOptions) storeOptions() *store.Options {
 		WithMaxValueLen(opts.MaxValueLen).
 		WithMaxTxEntries(opts.MaxTxEntries).
 		WithWriteTxHeaderVersion(opts.WriteTxHeaderVersion).
+		WithMaxActiveTransactions(opts.MaxActiveTransactions).
+		WithMVCCReadSetLimit(opts.MVCCReadSetLimit).
 		WithMaxConcurrency(opts.MaxConcurrency).
 		WithMaxIOConcurrency(opts.MaxIOConcurrency).
 		WithWriteBufferSize(opts.WriteBufferSize).
 		WithTxLogCacheSize(opts.TxLogCacheSize).
+		WithVLogCacheSize(opts.VLogCacheSize).
 		WithVLogMaxOpenedFiles(opts.VLogMaxOpenedFiles).
 		WithTxLogMaxOpenedFiles(opts.TxLogMaxOpenedFiles).
 		WithCommitLogMaxOpenedFiles(opts.CommitLogMaxOpenedFiles).
-		WithMaxLinearProofLen(0). // fixed no limitation, it may be customized in the future
 		WithIndexOptions(indexOpts).
 		WithAHTOptions(ahtOpts)
 
@@ -271,25 +307,32 @@ func (opts *dbOptions) databaseNullableSettings() *schema.DatabaseNullableSettin
 		ReplicationSettings: &schema.ReplicationNullableSettings{
 			Replica:                      &schema.NullableBool{Value: opts.Replica},
 			SyncReplication:              &schema.NullableBool{Value: opts.SyncReplication},
-			MasterDatabase:               &schema.NullableString{Value: opts.MasterDatabase},
-			MasterAddress:                &schema.NullableString{Value: opts.MasterAddress},
-			MasterPort:                   &schema.NullableUint32{Value: uint32(opts.MasterPort)},
-			FollowerUsername:             &schema.NullableString{Value: opts.FollowerUsername},
-			FollowerPassword:             &schema.NullableString{Value: opts.FollowerPassword},
+			PrimaryDatabase:              &schema.NullableString{Value: opts.PrimaryDatabase},
+			PrimaryHost:                  &schema.NullableString{Value: opts.PrimaryHost},
+			PrimaryPort:                  &schema.NullableUint32{Value: uint32(opts.PrimaryPort)},
+			PrimaryUsername:              &schema.NullableString{Value: opts.PrimaryUsername},
+			PrimaryPassword:              &schema.NullableString{Value: opts.PrimaryPassword},
 			SyncAcks:                     &schema.NullableUint32{Value: uint32(opts.SyncAcks)},
 			PrefetchTxBufferSize:         &schema.NullableUint32{Value: uint32(opts.PrefetchTxBufferSize)},
 			ReplicationCommitConcurrency: &schema.NullableUint32{Value: uint32(opts.ReplicationCommitConcurrency)},
 			AllowTxDiscarding:            &schema.NullableBool{Value: opts.AllowTxDiscarding},
+			SkipIntegrityCheck:           &schema.NullableBool{Value: opts.SkipIntegrityCheck},
+			WaitForIndexing:              &schema.NullableBool{Value: opts.WaitForIndexing},
 		},
 
 		SyncFrequency: &schema.NullableMilliseconds{Value: int64(opts.SyncFrequency)},
 
-		FileSize:     &schema.NullableUint32{Value: uint32(opts.FileSize)},
-		MaxKeyLen:    &schema.NullableUint32{Value: uint32(opts.MaxKeyLen)},
-		MaxValueLen:  &schema.NullableUint32{Value: uint32(opts.MaxValueLen)},
-		MaxTxEntries: &schema.NullableUint32{Value: uint32(opts.MaxTxEntries)},
+		FileSize:       &schema.NullableUint32{Value: uint32(opts.FileSize)},
+		MaxKeyLen:      &schema.NullableUint32{Value: uint32(opts.MaxKeyLen)},
+		MaxValueLen:    &schema.NullableUint32{Value: uint32(opts.MaxValueLen)},
+		MaxTxEntries:   &schema.NullableUint32{Value: uint32(opts.MaxTxEntries)},
+		EmbeddedValues: &schema.NullableBool{Value: opts.EmbeddedValues},
+		PreallocFiles:  &schema.NullableBool{Value: opts.PreallocFiles},
 
 		ExcludeCommitTime: &schema.NullableBool{Value: opts.ExcludeCommitTime},
+
+		MaxActiveTransactions: &schema.NullableUint32{Value: uint32(opts.MaxActiveTransactions)},
+		MvccReadSetLimit:      &schema.NullableUint32{Value: uint32(opts.MVCCReadSetLimit)},
 
 		MaxConcurrency:   &schema.NullableUint32{Value: uint32(opts.MaxConcurrency)},
 		MaxIOConcurrency: &schema.NullableUint32{Value: uint32(opts.MaxIOConcurrency)},
@@ -297,6 +340,7 @@ func (opts *dbOptions) databaseNullableSettings() *schema.DatabaseNullableSettin
 		WriteBufferSize: &schema.NullableUint32{Value: uint32(opts.WriteBufferSize)},
 
 		TxLogCacheSize:          &schema.NullableUint32{Value: uint32(opts.TxLogCacheSize)},
+		VLogCacheSize:           &schema.NullableUint32{Value: uint32(opts.VLogCacheSize)},
 		VLogMaxOpenedFiles:      &schema.NullableUint32{Value: uint32(opts.VLogMaxOpenedFiles)},
 		TxLogMaxOpenedFiles:     &schema.NullableUint32{Value: uint32(opts.TxLogMaxOpenedFiles)},
 		CommitLogMaxOpenedFiles: &schema.NullableUint32{Value: uint32(opts.CommitLogMaxOpenedFiles)},
@@ -315,6 +359,8 @@ func (opts *dbOptions) databaseNullableSettings() *schema.DatabaseNullableSettin
 			NodesLogMaxOpenedFiles:   &schema.NullableUint32{Value: uint32(opts.IndexOptions.NodesLogMaxOpenedFiles)},
 			HistoryLogMaxOpenedFiles: &schema.NullableUint32{Value: uint32(opts.IndexOptions.HistoryLogMaxOpenedFiles)},
 			CommitLogMaxOpenedFiles:  &schema.NullableUint32{Value: uint32(opts.IndexOptions.CommitLogMaxOpenedFiles)},
+			MaxBulkSize:              &schema.NullableUint32{Value: uint32(opts.IndexOptions.MaxBulkSize)},
+			BulkPreparationTimeout:   &schema.NullableMilliseconds{Value: int64(opts.IndexOptions.BulkPreparationTimeout)},
 		},
 
 		AhtSettings: &schema.AHTNullableSettings{
@@ -327,6 +373,11 @@ func (opts *dbOptions) databaseNullableSettings() *schema.DatabaseNullableSettin
 		Autoload: &schema.NullableBool{Value: opts.Autoload.isEnabled()},
 
 		ReadTxPoolSize: &schema.NullableUint32{Value: uint32(opts.ReadTxPoolSize)},
+
+		TruncationSettings: &schema.TruncationNullableSettings{
+			RetentionPeriod:     &schema.NullableMilliseconds{Value: int64(opts.RetentionPeriod)},
+			TruncationFrequency: &schema.NullableMilliseconds{Value: int64(opts.TruncationFrequency)},
+		},
 	}
 }
 
@@ -335,7 +386,6 @@ func (opts *dbOptions) databaseNullableSettings() *schema.DatabaseNullableSettin
 // Only those fields that were present up to the 1.2.2 release are supported.
 // Changing any other fields requires new API calls.
 func dbSettingsToDBNullableSettings(settings *schema.DatabaseSettings) *schema.DatabaseNullableSettings {
-
 	nullableUInt32 := func(v uint32) *schema.NullableUint32 {
 		if v > 0 {
 			return &schema.NullableUint32{
@@ -346,12 +396,12 @@ func dbSettingsToDBNullableSettings(settings *schema.DatabaseSettings) *schema.D
 	}
 
 	repSettings := &schema.ReplicationNullableSettings{
-		Replica:          &schema.NullableBool{Value: settings.Replica},
-		MasterDatabase:   &schema.NullableString{Value: settings.MasterDatabase},
-		MasterAddress:    &schema.NullableString{Value: settings.MasterAddress},
-		MasterPort:       &schema.NullableUint32{Value: settings.MasterPort},
-		FollowerUsername: &schema.NullableString{Value: settings.FollowerUsername},
-		FollowerPassword: &schema.NullableString{Value: settings.FollowerPassword},
+		Replica:         &schema.NullableBool{Value: settings.Replica},
+		PrimaryDatabase: &schema.NullableString{Value: settings.PrimaryDatabase},
+		PrimaryHost:     &schema.NullableString{Value: settings.PrimaryHost},
+		PrimaryPort:     &schema.NullableUint32{Value: settings.PrimaryPort},
+		PrimaryUsername: &schema.NullableString{Value: settings.PrimaryUsername},
+		PrimaryPassword: &schema.NullableString{Value: settings.PrimaryPassword},
 	}
 
 	if !settings.Replica {
@@ -393,6 +443,16 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 				"max number of entries per transaction", opts.Database)
 		}
 
+		if settings.EmbeddedValues != nil {
+			return fmt.Errorf("%w: %s can not be changed after database creation ('%s')", ErrIllegalArguments,
+				"embedded values", opts.Database)
+		}
+
+		if settings.PreallocFiles != nil {
+			return fmt.Errorf("%w: %s can not be changed after database creation ('%s')", ErrIllegalArguments,
+				"prealloc files", opts.Database)
+		}
+
 		if settings.IndexSettings != nil && settings.IndexSettings.MaxNodeSize != nil {
 			return fmt.Errorf("%w: %s can not be changed after database creation ('%s')", ErrIllegalArguments, "max node size", opts.Database)
 		}
@@ -422,30 +482,30 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 		} else if opts.Replica {
 			opts.SyncAcks = 0
 		}
-		if rs.MasterDatabase != nil {
-			opts.MasterDatabase = rs.MasterDatabase.Value
+		if rs.PrimaryDatabase != nil {
+			opts.PrimaryDatabase = rs.PrimaryDatabase.Value
 		} else if !opts.Replica {
-			opts.MasterDatabase = ""
+			opts.PrimaryDatabase = ""
 		}
-		if rs.MasterAddress != nil {
-			opts.MasterAddress = rs.MasterAddress.Value
+		if rs.PrimaryHost != nil {
+			opts.PrimaryHost = rs.PrimaryHost.Value
 		} else if !opts.Replica {
-			opts.MasterAddress = ""
+			opts.PrimaryHost = ""
 		}
-		if rs.MasterPort != nil {
-			opts.MasterPort = int(rs.MasterPort.Value)
+		if rs.PrimaryPort != nil {
+			opts.PrimaryPort = int(rs.PrimaryPort.Value)
 		} else if !opts.Replica {
-			opts.MasterPort = 0
+			opts.PrimaryPort = 0
 		}
-		if rs.FollowerUsername != nil {
-			opts.FollowerUsername = rs.FollowerUsername.Value
+		if rs.PrimaryUsername != nil {
+			opts.PrimaryUsername = rs.PrimaryUsername.Value
 		} else if !opts.Replica {
-			opts.FollowerUsername = ""
+			opts.PrimaryUsername = ""
 		}
-		if rs.FollowerPassword != nil {
-			opts.FollowerPassword = rs.FollowerPassword.Value
+		if rs.PrimaryPassword != nil {
+			opts.PrimaryPassword = rs.PrimaryPassword.Value
 		} else if !opts.Replica {
-			opts.FollowerPassword = ""
+			opts.PrimaryPassword = ""
 		}
 		if rs.PrefetchTxBufferSize != nil {
 			opts.PrefetchTxBufferSize = int(rs.PrefetchTxBufferSize.Value)
@@ -465,6 +525,12 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 		}
 		if rs.AllowTxDiscarding != nil {
 			opts.AllowTxDiscarding = rs.AllowTxDiscarding.Value
+		}
+		if rs.SkipIntegrityCheck != nil {
+			opts.SkipIntegrityCheck = rs.SkipIntegrityCheck.Value
+		}
+		if rs.WaitForIndexing != nil {
+			opts.WaitForIndexing = rs.WaitForIndexing.Value
 		}
 	}
 
@@ -490,8 +556,23 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 		opts.MaxTxEntries = int(settings.MaxTxEntries.Value)
 	}
 
+	if settings.EmbeddedValues != nil {
+		opts.EmbeddedValues = settings.EmbeddedValues.Value
+	}
+
+	if settings.PreallocFiles != nil {
+		opts.PreallocFiles = settings.PreallocFiles.Value
+	}
+
 	if settings.ExcludeCommitTime != nil {
 		opts.ExcludeCommitTime = settings.ExcludeCommitTime.Value
+	}
+
+	if settings.MaxActiveTransactions != nil {
+		opts.MaxActiveTransactions = int(settings.MaxActiveTransactions.Value)
+	}
+	if settings.MvccReadSetLimit != nil {
+		opts.MVCCReadSetLimit = int(settings.MvccReadSetLimit.Value)
 	}
 
 	if settings.MaxConcurrency != nil {
@@ -507,6 +588,9 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 
 	if settings.TxLogCacheSize != nil {
 		opts.TxLogCacheSize = int(settings.TxLogCacheSize.Value)
+	}
+	if settings.VLogCacheSize != nil {
+		opts.VLogCacheSize = int(settings.VLogCacheSize.Value)
 	}
 	if settings.VLogMaxOpenedFiles != nil {
 		opts.VLogMaxOpenedFiles = int(settings.VLogMaxOpenedFiles.Value)
@@ -527,6 +611,16 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 			opts.Autoload = enabledState
 		} else {
 			opts.Autoload = disabledState
+		}
+	}
+
+	if settings.TruncationSettings != nil {
+		if settings.TruncationSettings.RetentionPeriod != nil {
+			opts.RetentionPeriod = Milliseconds(settings.TruncationSettings.RetentionPeriod.Value)
+		}
+
+		if settings.TruncationSettings.TruncationFrequency != nil {
+			opts.TruncationFrequency = Milliseconds(settings.TruncationSettings.TruncationFrequency.Value)
 		}
 	}
 
@@ -574,6 +668,12 @@ func (s *ImmuServer) overwriteWith(opts *dbOptions, settings *schema.DatabaseNul
 		}
 		if settings.IndexSettings.CommitLogMaxOpenedFiles != nil {
 			opts.IndexOptions.CommitLogMaxOpenedFiles = int(settings.IndexSettings.CommitLogMaxOpenedFiles.Value)
+		}
+		if settings.IndexSettings.MaxBulkSize != nil {
+			opts.IndexOptions.MaxBulkSize = int(settings.IndexSettings.MaxBulkSize.Value)
+		}
+		if settings.IndexSettings.BulkPreparationTimeout != nil {
+			opts.IndexOptions.BulkPreparationTimeout = Milliseconds(settings.IndexSettings.BulkPreparationTimeout.Value)
 		}
 	}
 
@@ -623,67 +723,79 @@ func (opts *dbOptions) Validate() error {
 	} else {
 		if opts.SyncAcks < 0 {
 			return fmt.Errorf(
-				"%w: invalid value for replication option SyncAcks on master database '%s'",
+				"%w: invalid value for replication option SyncAcks on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
-		if opts.MasterDatabase != "" {
+		if opts.PrimaryDatabase != "" {
 			return fmt.Errorf(
-				"%w: invalid value for replication option MasterDatabase on master database '%s'",
+				"%w: invalid value for replication option PrimaryDatabase on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
-		if opts.MasterAddress != "" {
+		if opts.PrimaryHost != "" {
 			return fmt.Errorf(
-				"%w: invalid value for replication option MasterAddress on master database '%s'",
+				"%w: invalid value for replication option PrimaryHost on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
-		if opts.MasterPort > 0 {
+		if opts.PrimaryPort > 0 {
 			return fmt.Errorf(
-				"%w: invalid value for replication option MasterPort on master database '%s'",
+				"%w: invalid value for replication option PrimaryPort on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
-		if opts.FollowerUsername != "" {
+		if opts.PrimaryUsername != "" {
 			return fmt.Errorf(
-				"%w: invalid value for replication option FollowerUsername on master database '%s'",
+				"%w: invalid value for replication option PrimaryUsername on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
-		if opts.FollowerPassword != "" {
+		if opts.PrimaryPassword != "" {
 			return fmt.Errorf(
-				"%w: invalid value for replication option FollowerPassword on master database '%s'",
+				"%w: invalid value for replication option PrimaryPassword on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
 		if opts.PrefetchTxBufferSize > 0 {
 			return fmt.Errorf(
-				"%w: invalid value for replication option PrefetchTxBufferSize on master database '%s'",
+				"%w: invalid value for replication option PrefetchTxBufferSize on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
 		if opts.ReplicationCommitConcurrency > 0 {
 			return fmt.Errorf(
-				"%w: invalid value for replication option ReplicationCommitConcurrency on master database '%s'",
+				"%w: invalid value for replication option ReplicationCommitConcurrency on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
 		if opts.AllowTxDiscarding {
 			return fmt.Errorf(
-				"%w: invalid value for replication option AllowTxDiscarding on master database '%s'",
+				"%w: invalid value for replication option AllowTxDiscarding on primary database '%s'",
+				ErrIllegalArguments, opts.Database)
+		}
+
+		if opts.SkipIntegrityCheck {
+			return fmt.Errorf(
+				"%w: invalid value for replication option SkipIntegrityCheck on primary database '%s'",
+				ErrIllegalArguments, opts.Database)
+		}
+
+		if opts.WaitForIndexing {
+			return fmt.Errorf(
+				"%w: invalid value for replication option WaitForIndexing on primary database '%s'",
 				ErrIllegalArguments, opts.Database)
 		}
 
 		if opts.SyncReplication && opts.SyncAcks == 0 {
 			return fmt.Errorf(
-				"%w: invalid replication options for master database '%s'. It is necessary to have at least one sync follower",
+				"%w: invalid replication options for primary database '%s'. It is necessary to have at least one sync replica",
 				ErrIllegalArguments, opts.Database)
 		}
 
 		if !opts.SyncReplication && opts.SyncAcks > 0 {
 			return fmt.Errorf(
-				"%w: invalid replication options for master database '%s'. SyncAcks should be set to 0",
+				"%w: invalid replication options for primary database '%s'. SyncAcks should be set to 0",
 				ErrIllegalArguments, opts.Database)
 		}
 	}
@@ -695,14 +807,30 @@ func (opts *dbOptions) Validate() error {
 		)
 	}
 
+	if opts.RetentionPeriod < 0 || (opts.RetentionPeriod > 0 && opts.RetentionPeriod < Milliseconds(store.MinimumRetentionPeriod.Milliseconds())) {
+		return fmt.Errorf(
+			"%w: invalid retention period for database '%s'. RetentionPeriod should at least '%v' hours",
+			ErrIllegalArguments, opts.Database, store.MinimumRetentionPeriod.Hours())
+	}
+
+	if opts.TruncationFrequency < 0 || (opts.TruncationFrequency > 0 && opts.TruncationFrequency < Milliseconds(store.MinimumTruncationFrequency.Milliseconds())) {
+		return fmt.Errorf(
+			"%w: invalid truncation frequency for database '%s'. TruncationFrequency should at least '%v' hour",
+			ErrIllegalArguments, opts.Database, store.MinimumTruncationFrequency.Hours())
+	}
+
 	return opts.storeOptions().Validate()
 }
 
 func (opts *dbOptions) isReplicatorRequired() bool {
 	return opts.Replica &&
-		opts.MasterDatabase != "" &&
-		opts.MasterAddress != "" &&
-		opts.MasterPort > 0
+		opts.PrimaryDatabase != "" &&
+		opts.PrimaryHost != "" &&
+		opts.PrimaryPort > 0
+}
+
+func (opts *dbOptions) isDataRetentionEnabled() bool {
+	return opts.RetentionPeriod > 0
 }
 
 func (s *ImmuServer) saveDBOptions(options *dbOptions) error {
@@ -715,7 +843,7 @@ func (s *ImmuServer) saveDBOptions(options *dbOptions) error {
 	optionsKey[0] = KeyPrefixDBSettings
 	copy(optionsKey[1:], []byte(options.Database))
 
-	_, err = s.sysDB.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{Key: optionsKey, Value: serializedOptions}}})
+	_, err = s.sysDB.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{Key: optionsKey, Value: serializedOptions}}})
 
 	return err
 }
@@ -725,7 +853,7 @@ func (s *ImmuServer) deleteDBOptionsFor(db string) error {
 	optionsKey[0] = KeyPrefixDBSettings
 	copy(optionsKey[1:], []byte(db))
 
-	_, err := s.sysDB.Delete(&schema.DeleteKeysRequest{
+	_, err := s.sysDB.Delete(context.Background(), &schema.DeleteKeysRequest{
 		Keys: [][]byte{
 			optionsKey,
 		},
@@ -736,17 +864,17 @@ func (s *ImmuServer) deleteDBOptionsFor(db string) error {
 
 func (s *ImmuServer) loadDBOptions(database string, createIfNotExists bool) (*dbOptions, error) {
 	if database == s.Options.systemAdminDBName || database == s.Options.defaultDBName {
-		return s.defaultDBOptions(database), nil
+		return s.defaultDBOptions(database, s.Options.systemAdminDBName), nil
 	}
 
 	optionsKey := make([]byte, 1+len(database))
 	optionsKey[0] = KeyPrefixDBSettings
 	copy(optionsKey[1:], []byte(database))
 
-	options := s.defaultDBOptions(database)
+	options := s.defaultDBOptions(database, "")
 
-	e, err := s.sysDB.Get(&schema.KeyRequest{Key: optionsKey})
-	if err == store.ErrKeyNotFound && createIfNotExists {
+	e, err := s.sysDB.Get(context.Background(), &schema.KeyRequest{Key: optionsKey})
+	if errors.Is(err, store.ErrKeyNotFound) && createIfNotExists {
 		err = s.saveDBOptions(options)
 		if err != nil {
 			return nil, err
@@ -777,20 +905,29 @@ func (s *ImmuServer) logDBOptions(database string, opts *dbOptions) {
 	s.Logger.Infof("%s.PrefetchTxBufferSize: %v", database, opts.PrefetchTxBufferSize)
 	s.Logger.Infof("%s.ReplicationCommitConcurrency: %v", database, opts.ReplicationCommitConcurrency)
 	s.Logger.Infof("%s.AllowTxDiscarding: %v", database, opts.AllowTxDiscarding)
+	s.Logger.Infof("%s.SkipIntegrityCheck: %v", database, opts.SkipIntegrityCheck)
+	s.Logger.Infof("%s.WaitForIndexing: %v", database, opts.WaitForIndexing)
 	s.Logger.Infof("%s.FileSize: %v", database, opts.FileSize)
 	s.Logger.Infof("%s.MaxKeyLen: %v", database, opts.MaxKeyLen)
 	s.Logger.Infof("%s.MaxValueLen: %v", database, opts.MaxValueLen)
 	s.Logger.Infof("%s.MaxTxEntries: %v", database, opts.MaxTxEntries)
+	s.Logger.Infof("%s.EmbeddedValues: %v", database, opts.EmbeddedValues)
+	s.Logger.Infof("%s.PreallocFiles: %v", database, opts.PreallocFiles)
 	s.Logger.Infof("%s.ExcludeCommitTime: %v", database, opts.ExcludeCommitTime)
+	s.Logger.Infof("%s.MaxActiveTransactions: %v", database, opts.MaxActiveTransactions)
+	s.Logger.Infof("%s.MVCCReadSetLimit: %v", database, opts.MVCCReadSetLimit)
 	s.Logger.Infof("%s.MaxConcurrency: %v", database, opts.MaxConcurrency)
 	s.Logger.Infof("%s.MaxIOConcurrency: %v", database, opts.MaxIOConcurrency)
 	s.Logger.Infof("%s.WriteBufferSize: %v", database, opts.WriteBufferSize)
 	s.Logger.Infof("%s.TxLogCacheSize: %v", database, opts.TxLogCacheSize)
+	s.Logger.Infof("%s.VLogCacheSize: %v", database, opts.VLogCacheSize)
 	s.Logger.Infof("%s.VLogMaxOpenedFiles: %v", database, opts.VLogMaxOpenedFiles)
 	s.Logger.Infof("%s.TxLogMaxOpenedFiles: %v", database, opts.TxLogMaxOpenedFiles)
 	s.Logger.Infof("%s.CommitLogMaxOpenedFiles: %v", database, opts.CommitLogMaxOpenedFiles)
 	s.Logger.Infof("%s.WriteTxHeaderVersion: %v", database, opts.WriteTxHeaderVersion)
 	s.Logger.Infof("%s.ReadTxPoolSize: %v", database, opts.ReadTxPoolSize)
+	s.Logger.Infof("%s.TruncationFrequency: %v", database, opts.TruncationFrequency)
+	s.Logger.Infof("%s.RetentionPeriod: %v", database, opts.RetentionPeriod)
 	s.Logger.Infof("%s.IndexOptions.FlushThreshold: %v", database, opts.IndexOptions.FlushThreshold)
 	s.Logger.Infof("%s.IndexOptions.SyncThreshold: %v", database, opts.IndexOptions.SyncThreshold)
 	s.Logger.Infof("%s.IndexOptions.FlushBufferSize: %v", database, opts.IndexOptions.FlushBufferSize)
@@ -804,6 +941,8 @@ func (s *ImmuServer) logDBOptions(database string, opts *dbOptions) {
 	s.Logger.Infof("%s.IndexOptions.NodesLogMaxOpenedFiles: %v", database, opts.IndexOptions.NodesLogMaxOpenedFiles)
 	s.Logger.Infof("%s.IndexOptions.HistoryLogMaxOpenedFiles: %v", database, opts.IndexOptions.HistoryLogMaxOpenedFiles)
 	s.Logger.Infof("%s.IndexOptions.CommitLogMaxOpenedFiles: %v", database, opts.IndexOptions.CommitLogMaxOpenedFiles)
+	s.Logger.Infof("%s.IndexOptions.MaxBulkSize: %v", database, opts.IndexOptions.MaxBulkSize)
+	s.Logger.Infof("%s.IndexOptions.BulkPreparationTimeout: %v", database, opts.IndexOptions.BulkPreparationTimeout)
 	s.Logger.Infof("%s.AHTOptions.SyncThreshold: %v", database, opts.AHTOptions.SyncThreshold)
 	s.Logger.Infof("%s.AHTOptions.WriteBufferSize: %v", database, opts.AHTOptions.WriteBufferSize)
 }

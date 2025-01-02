@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 
@@ -27,7 +28,7 @@ import (
 // ExecAll like Set it permits many insertions at once.
 // The difference is that is possible to to specify a list of a mix of key value set and zAdd insertions.
 // If zAdd reference is not yet present on disk it's possible to add it as a regular key value and the reference is done onFly
-func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
+func (d *db) ExecAll(ctx context.Context, req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 	if req == nil {
 		return nil, store.ErrIllegalArguments
 	}
@@ -45,7 +46,7 @@ func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 
 	if !req.NoWait {
 		lastTxID, _ := d.st.CommittedAlh()
-		err := d.st.WaitForIndexingUpto(lastTxID, nil)
+		err := d.st.WaitForIndexingUpto(ctx, lastTxID)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +62,6 @@ func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 		kmap := make(map[[sha256.Size]byte]bool)
 
 		for i, op := range req.Operations {
-
 			e := &store.EntrySpec{}
 
 			switch x := op.Operation.(type) {
@@ -98,14 +98,12 @@ func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 				_, exists := kmap[sha256.Sum256(x.Ref.ReferencedKey)]
 
 				if req.NoWait && !exists {
-					return nil, nil, fmt.Errorf(
-						"%w: can not create a reference to a key that was not set in the same transaction",
-						ErrNoWaitOperationMustBeSelfContained)
+					return nil, nil, fmt.Errorf("%w: can not create a reference to a key that was not set in the same transaction", ErrNoWaitOperationMustBeSelfContained)
 				}
 
 				if !req.NoWait {
 					// check key does not exists or it's already a reference
-					entry, err := d.getAtTx(EncodeKey(x.Ref.Key), 0, 0, index, 0)
+					entry, err := d.getAtTx(ctx, EncodeKey(x.Ref.Key), 0, 0, index, 0, true)
 					if err != nil && err != store.ErrKeyNotFound {
 						return nil, nil, err
 					}
@@ -115,7 +113,7 @@ func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 
 					if !exists || x.Ref.AtTx > 0 {
 						// check referenced key exists and it's not a reference
-						refEntry, err := d.getAtTx(EncodeKey(x.Ref.ReferencedKey), x.Ref.AtTx, 0, index, 0)
+						refEntry, err := d.getAtTx(ctx, EncodeKey(x.Ref.ReferencedKey), x.Ref.AtTx, 0, index, 0, true)
 						if err != nil {
 							return nil, nil, err
 						}
@@ -160,15 +158,13 @@ func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 				_, exists := kmap[sha256.Sum256(x.ZAdd.Key)]
 
 				if req.NoWait && !exists {
-					return nil, nil, fmt.Errorf(
-						"%w: can not create a reference into a set for a key that was not set in the same transaction",
-						ErrNoWaitOperationMustBeSelfContained)
+					return nil, nil, fmt.Errorf("%w: can not create a reference into a set for a key that was not set in the same transaction", ErrNoWaitOperationMustBeSelfContained)
 				}
 
 				if !req.NoWait {
 					if !exists || x.ZAdd.AtTx > 0 {
 						// check referenced key exists and it's not a reference
-						refEntry, err := d.getAtTx(EncodeKey(x.ZAdd.Key), x.ZAdd.AtTx, 0, index, 0)
+						refEntry, err := d.getAtTx(ctx, EncodeKey(x.ZAdd.Key), x.ZAdd.AtTx, 0, index, 0, true)
 						if err != nil {
 							return nil, nil, err
 						}
@@ -204,7 +200,7 @@ func (d *db) ExecAll(req *schema.ExecAllRequest) (*schema.TxHeader, error) {
 		return entries, preconditions, nil
 	}
 
-	hdr, err := d.st.CommitWith(callback, !req.NoWait)
+	hdr, err := d.st.CommitWith(ctx, callback, !req.NoWait)
 	if err != nil {
 		return nil, err
 	}

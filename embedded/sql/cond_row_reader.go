@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,10 @@ limitations under the License.
 
 package sql
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 type conditionalRowReader struct {
 	rowReader RowReader
@@ -39,20 +42,12 @@ func (cr *conditionalRowReader) Tx() *SQLTx {
 	return cr.rowReader.Tx()
 }
 
-func (cr *conditionalRowReader) Database() string {
-	return cr.rowReader.Database()
-}
-
 func (cr *conditionalRowReader) TableAlias() string {
 	return cr.rowReader.TableAlias()
 }
 
 func (cr *conditionalRowReader) Parameters() map[string]interface{} {
 	return cr.rowReader.Parameters()
-}
-
-func (cr *conditionalRowReader) SetParameters(params map[string]interface{}) error {
-	return cr.rowReader.SetParameters(params)
 }
 
 func (cr *conditionalRowReader) OrderBy() []ColDescriptor {
@@ -63,33 +58,33 @@ func (cr *conditionalRowReader) ScanSpecs() *ScanSpecs {
 	return cr.rowReader.ScanSpecs()
 }
 
-func (cr *conditionalRowReader) Columns() ([]ColDescriptor, error) {
-	return cr.rowReader.Columns()
+func (cr *conditionalRowReader) Columns(ctx context.Context) ([]ColDescriptor, error) {
+	return cr.rowReader.Columns(ctx)
 }
 
-func (cr *conditionalRowReader) colsBySelector() (map[string]ColDescriptor, error) {
-	return cr.rowReader.colsBySelector()
+func (cr *conditionalRowReader) colsBySelector(ctx context.Context) (map[string]ColDescriptor, error) {
+	return cr.rowReader.colsBySelector(ctx)
 }
 
-func (cr *conditionalRowReader) InferParameters(params map[string]SQLValueType) error {
-	err := cr.rowReader.InferParameters(params)
+func (cr *conditionalRowReader) InferParameters(ctx context.Context, params map[string]SQLValueType) error {
+	err := cr.rowReader.InferParameters(ctx, params)
 	if err != nil {
 		return err
 	}
 
-	cols, err := cr.colsBySelector()
+	cols, err := cr.colsBySelector(ctx)
 	if err != nil {
 		return err
 	}
 
-	_, err = cr.condition.inferType(cols, params, cr.Database(), cr.TableAlias())
+	_, err = cr.condition.inferType(cols, params, cr.TableAlias())
 
 	return err
 }
 
-func (cr *conditionalRowReader) Read() (*Row, error) {
+func (cr *conditionalRowReader) Read(ctx context.Context) (*Row, error) {
 	for {
-		row, err := cr.rowReader.Read()
+		row, err := cr.rowReader.Read(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -99,7 +94,7 @@ func (cr *conditionalRowReader) Read() (*Row, error) {
 			return nil, fmt.Errorf("%w: when evaluating WHERE clause", err)
 		}
 
-		r, err := cond.reduce(cr.Tx(), row, cr.rowReader.Database(), cr.rowReader.TableAlias())
+		r, err := cond.reduce(cr.Tx(), row, cr.rowReader.TableAlias())
 		if err != nil {
 			return nil, fmt.Errorf("%w: when evaluating WHERE clause", err)
 		}

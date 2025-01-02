@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -48,7 +48,7 @@ func TestScannersErrors(t *testing.T) {
 		return nil, errZScan
 	}
 	_, err = ic.ZScan(args)
-	require.Equal(t, errZScan, err)
+	require.ErrorIs(t, err, errZScan)
 
 	immuClientMock.ZScanF = func(context.Context, *schema.ZScanOptions) (*schema.ZStructuredItemList, error) {
 		return &schema.ZStructuredItemList{}, nil
@@ -77,7 +77,7 @@ func TestScannersErrors(t *testing.T) {
 		return nil, errIScan
 	}
 	_, err = ic.IScan(args)
-	require.Equal(t, errIScan, err)
+	require.ErrorIs(t, err, errIScan)
 
 	immuClientMock.IScanF = func(context.Context, uint64, uint64) (*schema.SPage, error) {
 		return &schema.SPage{}, nil
@@ -100,7 +100,7 @@ func TestScannersErrors(t *testing.T) {
 		return nil, errScan
 	}
 	_, err = ic.Scan(args)
-	require.Equal(t, errScan, err)
+	require.ErrorIs(t, err, errScan)
 
 	immuClientMock.ScanF = func(context.Context, *schema.ScanOptions) (*schema.StructuredItemList, error) {
 		return &schema.StructuredItemList{}, nil
@@ -115,6 +115,6 @@ func TestScannersErrors(t *testing.T) {
 		return nil, errCount
 	}
 	_, err = ic.Count(args)
-	require.Equal(t, errCount, err)
+	require.ErrorIs(t, err, errCount)
 }
 */

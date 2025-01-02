@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,20 +23,20 @@ import (
 
 	"github.com/codenotary/immudb/embedded/store"
 	immuerrors "github.com/codenotary/immudb/pkg/errors"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMapServerError(t *testing.T) {
 	err := mapServerError(store.ErrIllegalState)
-	assert.Equal(t, ErrIllegalState, err)
+	require.ErrorIs(t, err, ErrIllegalState)
 
 	err = mapServerError(store.ErrIllegalArguments)
-	assert.Equal(t, ErrIllegalArguments, err)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	someError := errors.New("some error")
 	err = mapServerError(someError)
-	assert.Equal(t, someError, err)
+	require.ErrorIs(t, err, someError)
 
 	err = mapServerError(fmt.Errorf("%w: test", store.ErrPreconditionFailed))
-	assert.Equal(t, immuerrors.CodIntegrityConstraintViolation, err.(immuerrors.Error).Code())
+	require.Equal(t, immuerrors.CodIntegrityConstraintViolation, err.(immuerrors.Error).Code())
 }

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ package stream
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"testing"
 
@@ -35,10 +34,10 @@ func TestParseKV(t *testing.T) {
 
 func TestParseErr(t *testing.T) {
 	b := &streamtest.ErrReader{ReadF: func(i []byte) (int, error) {
-		return 0, errors.New("custom one")
+		return 0, errCustom
 	}}
 	entry, err := ReadValue(b, 4096)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 	require.Nil(t, entry)
 }
 
@@ -47,13 +46,13 @@ func TestParseEof(t *testing.T) {
 		return 0, io.EOF
 	}}
 	entry, err := ReadValue(b, 4096)
-	require.Equal(t, io.EOF, err)
+	require.ErrorIs(t, err, io.EOF)
 	require.Nil(t, entry)
 }
 
 func TestParseEmptyContent(t *testing.T) {
 	content := []byte{}
 	value, err := ReadValue(bytes.NewBuffer(content), 4096)
-	require.Equal(t, io.EOF, err)
+	require.ErrorIs(t, err, io.EOF)
 	require.Nil(t, value)
 }

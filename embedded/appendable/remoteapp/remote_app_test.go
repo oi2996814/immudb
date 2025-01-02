@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -42,11 +42,11 @@ import (
 func TestOpenInllegalArguments(t *testing.T) {
 	dir := t.TempDir()
 	app, err := Open(dir, "", memory.Open(), nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 	require.Nil(t, app)
 
 	app, err = Open(dir, "", nil, DefaultOptions())
-	require.Equal(t, ErrIllegalArguments, err)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 	require.Nil(t, app)
 
 	app, err = Open(dir, "remotepath", memory.Open(), DefaultOptions())
@@ -210,7 +210,7 @@ func TestWritePastFirstChunk(t *testing.T) {
 
 	assert.True(t, waitForObject(mem, "00000005.aof"))
 
-	// LRU cache shuld contain chunks: 3, 4, 5 now, 6th is the active one
+	// Cache shuld contain chunks: 3, 4, 5 now, 6th is the active one
 	assert.True(t, waitForRemoval(fmt.Sprintf("%s/00000000.aof", path)))
 	assert.True(t, waitForRemoval(fmt.Sprintf("%s/00000001.aof", path)))
 	assert.True(t, waitForRemoval(fmt.Sprintf("%s/00000002.aof", path)))
@@ -226,8 +226,7 @@ func TestWritePastFirstChunk(t *testing.T) {
 }
 
 func prepareLocalTestFiles(t *testing.T) string {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
+	path := t.TempDir()
 	mapp, err := multiapp.Open(path, multiapp.DefaultOptions().WithFileSize(10).WithFileExt("tst"))
 	require.NoError(t, err)
 
@@ -245,7 +244,6 @@ func prepareLocalTestFiles(t *testing.T) string {
 
 func TestRemoteAppUploadOnStartup(t *testing.T) {
 	path := prepareLocalTestFiles(t)
-	defer os.RemoveAll(path)
 
 	opts := DefaultOptions()
 	opts.WithFileExt("tst")
@@ -262,9 +260,7 @@ func TestRemoteAppUploadOnStartup(t *testing.T) {
 }
 
 func TestReopenOnCleanShutdownWhenEmpty(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	mem := memory.Open()
 	opts := DefaultOptions()
@@ -295,9 +291,7 @@ func TestReopenOnCleanShutdownWhenEmpty(t *testing.T) {
 }
 
 func TestReopenFromRemoteStorageOnCleanShutdown(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	mem := memory.Open()
 	opts := DefaultOptions()
@@ -343,9 +337,7 @@ func TestRemoteStorageMetrics(t *testing.T) {
 	mFailed := testutil.ToFloat64(metricsUploadFailed)
 	mSucceeded := testutil.ToFloat64(metricsUploadSucceeded)
 
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	mem := memory.Open()
 	opts := DefaultOptions()
@@ -374,8 +366,8 @@ func TestRemoteStorageMetrics(t *testing.T) {
 		expectedCount   int
 		expectedStorage int
 	}{
-		{"Active", 1, 169},
-		{"Remote", 4, 4 * 170},
+		{"Active", 1, 198},
+		{"Remote", 4, 4 * 199},
 		{"Uploading", 0, 0},
 	} {
 		t.Run("Checking count for "+d.state, func(t *testing.T) {
@@ -430,6 +422,14 @@ func (r *remoteStorageMockingWrapper) Put(ctx context.Context, name string, file
 	return r.wrapped.Put(ctx, name, fileName)
 }
 
+func (r *remoteStorageMockingWrapper) Remove(ctx context.Context, name string) error {
+	panic("unimplemented")
+}
+
+func (r *remoteStorageMockingWrapper) RemoveAll(ctx context.Context, path string) error {
+	panic("unimplemented")
+}
+
 func (r *remoteStorageMockingWrapper) Exists(ctx context.Context, name string) (bool, error) {
 	if r.fnExists != nil {
 		return r.fnExists(ctx, name, func() (bool, error) {
@@ -451,9 +451,7 @@ func (r *remoteStorageMockingWrapper) ListEntries(ctx context.Context, path stri
 func TestRemoteStorageUploadRetry(t *testing.T) {
 	mRetries := testutil.ToFloat64(metricsUploadRetried)
 
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	// Injecting exactly one error in put, get and exists operations
 	var putErrInjected int32
@@ -498,9 +496,7 @@ func TestRemoteStorageUploadRetry(t *testing.T) {
 }
 
 func TestRemoteStorageUploadCancel(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	for _, name := range []string{"Put", "Get", "Exists"} {
 		t.Run(name, func(t *testing.T) {
@@ -567,9 +563,7 @@ func TestRemoteStorageUploadCancel(t *testing.T) {
 }
 
 func TestRemoteStorageUploadCancelWhenThrottled(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	// Injecting exactly one error in put, get and exists operations
 	mem := &remoteStorageMockingWrapper{
@@ -603,9 +597,7 @@ func TestRemoteStorageUploadCancelWhenThrottled(t *testing.T) {
 }
 
 func _TestRemoteStorageUploadUnrecoverableError(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	mUploadFailed := testutil.ToFloat64(metricsUploadFailed)
 
@@ -659,9 +651,7 @@ type errReader struct {
 func (e errReader) Read([]byte) (int, error) { return 0, e.err }
 
 func _TestRemoteStorageDownloadRetry(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	for _, errKind := range []string{"Open", "Read"} {
 		t.Run(errKind, func(t *testing.T) {
@@ -724,9 +714,7 @@ func _TestRemoteStorageDownloadRetry(t *testing.T) {
 }
 
 func TestRemoteStorageDownloadCancel(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	for _, errKind := range []string{"Open", "Read"} {
 		t.Run(errKind, func(t *testing.T) {
@@ -802,9 +790,7 @@ func TestRemoteStorageDownloadCancel(t *testing.T) {
 }
 
 func TestRemoteStorageDownloadUnrecoverableError(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	mDownloadFailed := testutil.ToFloat64(metricsDownloadFailed)
 
@@ -847,7 +833,6 @@ func TestRemoteStorageDownloadUnrecoverableError(t *testing.T) {
 
 func TestRemoteStorageOpenChunkWhenUploading(t *testing.T) {
 	path := prepareLocalTestFiles(t)
-	defer os.RemoveAll(path)
 
 	mem := &remoteStorageMockingWrapper{
 		wrapped: memory.Open(),
@@ -887,9 +872,7 @@ func TestRemoteStorageOpenChunkWhenUploading(t *testing.T) {
 }
 
 func TestRemoteStorageOpenInitialAppendableMissingRemoteChunk(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	// Prepare test dataset
 	opts := DefaultOptions()
@@ -925,14 +908,12 @@ func TestRemoteStorageOpenInitialAppendableMissingRemoteChunk(t *testing.T) {
 
 	// Opening should fail now
 	app, err = Open(path, "", m, opts)
-	require.Equal(t, ErrMissingRemoteChunk, err)
+	require.ErrorIs(t, err, ErrMissingRemoteChunk)
 	require.Nil(t, app)
 }
 
 func TestRemoteStorageOpenInitialAppendableCorruptedLocalFile(t *testing.T) {
-	path, err := ioutil.TempDir(os.TempDir(), "testdata")
-	require.NoError(t, err)
-	defer os.RemoveAll(path)
+	path := t.TempDir()
 
 	// Prepare test dataset
 	opts := DefaultOptions()
@@ -953,6 +934,6 @@ func TestRemoteStorageOpenInitialAppendableCorruptedLocalFile(t *testing.T) {
 
 	// Opening should fail now
 	app, err = Open(path, "", m, opts)
-	require.Equal(t, ErrInvalidRemoteStorage, err)
+	require.ErrorIs(t, err, ErrInvalidRemoteStorage)
 	require.Nil(t, app)
 }

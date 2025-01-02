@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -48,11 +48,12 @@ func NewUUIDContext(id xid.ID) uuidContext {
 	return uuidContext{id}
 }
 
-// getOrSetUUID either reads the identifier file or creates it if it doesn't exist.
+// getOrSetUUID either reads the identifier file or creates it if it doesn't exist
+// unless useExternalIdentifier is set to true, in which case the local identifier file is ignored.
 // In earlier versions, the file was located inside default DB directory. Now, it
 // is moved to the data directory. This function migrates the file to data directory
 // in case it exists in the default db directory.
-func getOrSetUUID(dataDir, defaultDbDir string) (xid.ID, error) {
+func getOrSetUUID(dataDir, defaultDbDir string, useExternalIdentifier bool) (xid.ID, error) {
 	fileInDataDir := path.Join(dataDir, IDENTIFIER_FNAME)
 	if fileExists(fileInDataDir) {
 		return getUUID(fileInDataDir)
@@ -67,6 +68,10 @@ func getOrSetUUID(dataDir, defaultDbDir string) (xid.ID, error) {
 
 		err = moveUUIDFile(guid, fileInDataDir, fileInDefaultDbDir)
 		return guid, err
+	}
+
+	if useExternalIdentifier {
+		return xid.ID{}, nil
 	}
 
 	guid := xid.New()
@@ -108,35 +113,26 @@ func fileExists(filename string) bool {
 	return !info.IsDir()
 }
 
-// WrappedServerStream ...
-type WrappedServerStream struct {
-	grpc.ServerStream
-}
-
-// RecvMsg ...
-func (w *WrappedServerStream) RecvMsg(m interface{}) error {
-	return w.ServerStream.RecvMsg(m)
-}
-
-// SendMsg ...
-func (w *WrappedServerStream) SendMsg(m interface{}) error {
-	return w.ServerStream.SendMsg(m)
-}
-
 // UUIDStreamContextSetter set uuid header in a stream
 func (u *uuidContext) UUIDStreamContextSetter(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	header := metadata.Pairs(SERVER_UUID_HEADER, u.UUID.String())
-	ss.SendHeader(header)
-	return handler(srv, &WrappedServerStream{ss})
+
+	err := ss.SendHeader(header)
+	if err != nil {
+		return err
+	}
+
+	return handler(srv, ss)
 }
 
 // UUIDContextSetter set uuid header
 func (u *uuidContext) UUIDContextSetter(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	header := metadata.Pairs(SERVER_UUID_HEADER, u.UUID.String())
+
 	err := grpc.SendHeader(ctx, header)
 	if err != nil {
 		return nil, err
 	}
-	m, err := handler(ctx, req)
-	return m, err
+
+	return handler(ctx, req)
 }

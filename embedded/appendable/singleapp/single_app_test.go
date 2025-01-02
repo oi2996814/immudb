@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -484,14 +484,12 @@ func TestSingleAppCantCreateFile(t *testing.T) {
 	os.Mkdir(filepath.Join(dir, "exists"), 0644)
 
 	_, err := Open(filepath.Join(dir, "exists"), DefaultOptions())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "exists")
+	require.ErrorContains(t, err, "exists")
 
 	app, err := Open(filepath.Join(dir, "valid"), DefaultOptions())
 	require.NoError(t, err)
 	err = app.Copy(filepath.Join(dir, "exists"))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "exists")
+	require.ErrorContains(t, err, "exists")
 }
 
 func TestSingleAppDiscard(t *testing.T) {

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,7 +53,7 @@ func newTxPool(opts txPoolOptions) (TxPool, error) {
 
 	if opts.preallocated {
 		for i := 0; i < opts.poolSize; i++ {
-			ret.pool = append(ret.pool, newTx(opts.maxTxEntries, opts.maxKeyLen))
+			ret.pool = append(ret.pool, NewTx(opts.maxTxEntries, opts.maxKeyLen))
 		}
 	}
 
@@ -69,7 +69,7 @@ func (p *txPool) Alloc() (*Tx, error) {
 			return nil, ErrTxPoolExhausted
 		}
 
-		p.pool = append(p.pool, newTx(p.opts.maxTxEntries, p.opts.maxKeyLen))
+		p.pool = append(p.pool, NewTx(p.opts.maxTxEntries, p.opts.maxKeyLen))
 	}
 
 	tx := p.pool[p.used]

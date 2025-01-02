@@ -1,0 +1,101 @@
+/*
+Copyright 2023 Codenotary Inc. All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+syntax = "proto3";
+
+package immudb.model;
+
+import "google/api/annotations.proto";
+import "protoc-gen-swagger/options/annotations.proto";
+
+option go_package = "github.com/codenotary/immudb/pkg/api/protomodel";
+option (grpc.gateway.protoc_gen_swagger.options.openapiv2_swagger) = {
+  base_path: "/api/v2",
+  info: {
+    title: "immudb REST API v2";
+    description: "Authorization API"
+  };
+  security_definitions: {
+    security: {
+      key: "ApiKeyAuth"
+      value: {
+        type: TYPE_API_KEY
+        in: IN_HEADER
+        name: "sessionid"
+        description: "Session Identifier"
+      }
+    }
+  }
+  security: {
+    security_requirement: {
+      key: "ApiKeyAuth"
+    }
+  }
+};
+
+message OpenSessionRequest {
+  string username = 1;
+  string password = 2;
+  string database = 3;
+}
+
+message OpenSessionResponse {
+  string sessionID = 1;
+  string serverUUID = 2;
+  int32 expirationTimestamp = 3;
+  int32 inactivityTimestamp = 4;
+}
+
+message KeepAliveRequest {}
+
+message KeepAliveResponse {}
+
+message CloseSessionRequest {}
+
+message CloseSessionResponse {}
+
+service AuthorizationService {
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse) {
+    option (google.api.http) = {
+      post: "/authorization/session/open"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      security: {} // no security
+      tags: "authorization";
+    };
+  }
+
+  rpc KeepAlive(KeepAliveRequest) returns (KeepAliveResponse) {
+    option (google.api.http) = {
+      post: "/authorization/session/keepalive"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "authorization";
+    };
+  }
+
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse) {
+    option (google.api.http) = {
+      post: "/authorization/session/close"
+      body: "*"
+    };
+    option (grpc.gateway.protoc_gen_swagger.options.openapiv2_operation) = {
+      tags: "authorization";
+    };
+  }
+}

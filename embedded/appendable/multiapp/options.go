@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,6 +41,7 @@ type Options struct {
 
 	fileMode          os.FileMode
 	fileSize          int
+	prealloc          bool
 	fileExt           string
 	metadata          []byte
 	maxOpenedFiles    int
@@ -152,6 +153,11 @@ func (opts *Options) WithWriteBufferSize(size int) *Options {
 	return opts
 }
 
+func (opts *Options) WithPrealloc(prealloc bool) *Options {
+	opts.prealloc = prealloc
+	return opts
+}
+
 func (opt *Options) GetFileExt() string {
 	return opt.fileExt
 }
@@ -166,4 +172,8 @@ func (opts *Options) GetReadBufferSize() int {
 
 func (opts *Options) GetWriteBufferSize() int {
 	return opts.writeBufferSize
+}
+
+func (opts *Options) GetPrealloc() bool {
+	return opts.prealloc
 }

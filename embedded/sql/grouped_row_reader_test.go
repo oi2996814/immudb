@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,33 +25,32 @@ import (
 )
 
 func TestGroupedRowReader(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.DefaultOptions())
+	st, err := store.Open(t.TempDir(), store.DefaultOptions().WithMultiIndexing(true))
 	require.NoError(t, err)
 
 	engine, err := NewEngine(st, DefaultOptions().WithPrefix(sqlPrefix))
 	require.NoError(t, err)
 
-	_, err = newGroupedRowReader(nil, nil, nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	_, err = newGroupedRowReader(nil, false, nil, nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	tx, err := engine.NewTx(context.Background())
+	tx, err := engine.NewTx(context.Background(), DefaultTxOptions())
 	require.NoError(t, err)
 
-	db, err := tx.catalog.newDatabase(1, "db1")
+	_, _, err = engine.Exec(context.Background(), tx, "CREATE TABLE table1(id INTEGER, number INTEGER, PRIMARY KEY id)", nil)
 	require.NoError(t, err)
 
-	table, err := db.newTable("table1", []*ColSpec{{colName: "id", colType: IntegerType}})
+	tx, err = engine.NewTx(context.Background(), DefaultTxOptions())
 	require.NoError(t, err)
 
-	index, err := table.newIndex(true, []uint32{1})
-	require.NoError(t, err)
-	require.NotNil(t, index)
-	require.Equal(t, table.primaryIndex, index)
+	defer tx.Cancel()
+
+	table := tx.catalog.tables[0]
 
 	r, err := newRawRowReader(tx, nil, table, period{}, "", &ScanSpecs{Index: table.primaryIndex})
 	require.NoError(t, err)
 
-	gr, err := newGroupedRowReader(r, []Selector{&ColSelector{col: "id"}}, []*ColSelector{{col: "id"}})
+	gr, err := newGroupedRowReader(r, false, []*AggColSelector{{aggFn: "COUNT", col: "id"}}, []*ColSelector{{col: "id"}})
 	require.NoError(t, err)
 
 	orderBy := gr.OrderBy()
@@ -60,9 +59,9 @@ func TestGroupedRowReader(t *testing.T) {
 	require.Equal(t, "id", orderBy[0].Column)
 	require.Equal(t, "table1", orderBy[0].Table)
 
-	cols, err := gr.Columns()
+	cols, err := gr.Columns(context.Background())
 	require.NoError(t, err)
-	require.Len(t, cols, 1)
+	require.Len(t, cols, 2)
 
 	scanSpecs := gr.ScanSpecs()
 	require.NotNil(t, scanSpecs)

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,39 +19,55 @@ package server_test
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
+	"net/http"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
+	isql "github.com/codenotary/immudb/embedded/sql"
 	"github.com/codenotary/immudb/pkg/pgsql/errors"
 	"github.com/codenotary/immudb/pkg/pgsql/server/pgmeta"
 	"github.com/codenotary/immudb/pkg/server"
-	"github.com/codenotary/immudb/pkg/server/servertest"
 	"github.com/jackc/pgx/v4"
-	_ "github.com/lib/pq"
+	pq "github.com/lib/pq"
+
 	"github.com/stretchr/testify/require"
 )
 
 func TestPgsqlServer_SimpleQuery(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -70,19 +86,34 @@ func TestPgsqlServer_SimpleQuery(t *testing.T) {
 }
 
 func TestPgsqlServer_SimpleQueryBlob(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -107,19 +138,34 @@ func TestPgsqlServer_SimpleQueryBlob(t *testing.T) {
 }
 
 func TestPgsqlServer_SimpleQueryBool(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -139,159 +185,279 @@ func TestPgsqlServer_SimpleQueryBool(t *testing.T) {
 }
 
 func TestPgsqlServer_SimpleQueryExecError(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	_, err = db.Exec("ILLEGAL STATEMENT")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "syntax error: unexpected IDENTIFIER at position 7")
 }
 
 func TestPgsqlServer_SimpleQueryQueryError(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	err = db.QueryRow("SELECT id, amount, title, isPresent FROM notExists").Scan()
-	require.Error(t, err)
+	require.ErrorContains(t, err, isql.ErrTableDoesNotExist.Error())
 }
 
 func TestPgsqlServer_SimpleQueryQueryMissingDatabase(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb  password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb  password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	err = db.QueryRow("SELECT id, amount, title, isPresent FROM notExists").Scan()
-	require.Error(t, err)
+	require.ErrorContains(t, err, errors.ErrDBNotprovided.Error())
 }
 
 func TestPgsqlServer_SimpleQueryQueryDatabaseNotExists(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=notexists password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=notexists password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	err = db.QueryRow("SELECT id, amount, title, isPresent FROM notExists").Scan()
-	require.Error(t, err)
+	require.ErrorContains(t, err, errors.ErrDBNotExists.Error())
 }
 
 func TestPgsqlServer_SimpleQueryQueryMissingUsername(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	err = db.QueryRow("SELECT id, amount, title, isPresent FROM notExists").Scan()
-	require.Error(t, err)
+	require.ErrorContains(t, err, errors.ErrInvalidUsernameOrPassword.Error())
 }
 
 func TestPgsqlServer_SimpleQueryQueryMissingPassword(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	err = db.QueryRow("SELECT id, amount, title, isPresent FROM notExists").Scan()
-	require.Error(t, err)
+	require.ErrorContains(t, err, errors.ErrPwNotprovided.Error())
 }
 
 func TestPgsqlServer_SimpleQueryQueryClosedConnError(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
-	bs.Stop()
 
 	err = db.QueryRow("SELECT id, amount, title, isPresent FROM notExists").Scan()
 	require.Error(t, err)
 }
 
 func TestPgsqlServer_SimpleQueryTerminate(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -309,23 +475,38 @@ func TestPgsqlServer_SimpleQueryTerminate(t *testing.T) {
 	var amount int64
 	var title string
 	err = db.QueryRow(fmt.Sprintf("SELECT id, amount, title FROM %s", table)).Scan(&id, &amount, &title)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "sql: database is closed")
 }
 
 func TestPgsqlServer_SimpleQueryQueryEmptyQueryMessage(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -340,46 +521,77 @@ func TestPgsqlServer_SimpleQueryQueryEmptyQueryMessage(t *testing.T) {
 	var amount int64
 	var title string
 	err = db.QueryRow(fmt.Sprintf("SELECT id, amount, title FROM %s WHERE id=2", table)).Scan(&id, &amount, &title)
-	require.Error(t, err)
+	require.ErrorIs(t, err, sql.ErrNoRows)
 }
 
 func TestPgsqlServer_SimpleQueryQueryCreateOrUseDatabaseNotSupported(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	_, err = db.Exec("CREATE DATABASE db")
-	require.Error(t, err)
+	require.NoError(t, err)
+
 	_, err = db.Exec("USE DATABASE db")
-	require.Error(t, err)
+	require.ErrorContains(t, err, errors.ErrUseDBStatementNotSupported.Error())
 
 }
 
 func TestPgsqlServer_SimpleQueryQueryExecError(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -388,171 +600,204 @@ func TestPgsqlServer_SimpleQueryQueryExecError(t *testing.T) {
 	require.NotNil(t, result)
 
 	_, err = db.Exec(fmt.Sprintf("UPSERT INTO %s (id, title) VALUES (1, 200, 'title 1')", table))
-	require.Error(t, err)
+	require.ErrorContains(t, err, isql.ErrInvalidNumberOfValues.Error())
 }
 
 func TestPgsqlServer_SimpleQueryQuerySSLConn(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
+	td := t.TempDir()
 
-	certPem := []byte(`-----BEGIN CERTIFICATE-----
-MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
-DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
-EjEQMA4GA1UEChMHQWNtZSBDbzBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABD0d
-7VNhbWvZLWPuj/RtHFjvtJBEwOkhbN/BnnE8rnZR8+sbwnc/KhCk3FhnpHZnQz7B
-5aETbbIgmuvewdjvSBSjYzBhMA4GA1UdDwEB/wQEAwICpDATBgNVHSUEDDAKBggr
-BgEFBQcDATAPBgNVHRMBAf8EBTADAQH/MCkGA1UdEQQiMCCCDmxvY2FsaG9zdDo1
-NDUzgg4xMjcuMC4wLjE6NTQ1MzAKBggqhkjOPQQDAgNIADBFAiEA2zpJEPQyz6/l
-Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
-6MF9+Yw1Yy0t
------END CERTIFICATE-----`)
-	keyPem := []byte(`-----BEGIN EC PRIVATE KEY-----
-MHcCAQEEIIrYSSNQFaA2Hwf1duRSxKtLYX5CB04fSeQ6tF1aY/PuoAoGCCqGSM49
-AwEHoUQDQgAEPR3tU2Fta9ktY+6P9G0cWO+0kETA6SFs38GecTyudlHz6xvCdz8q
-EKTcWGekdmdDPsHloRNtsiCa697B2O9IFA==
------END EC PRIVATE KEY-----`)
-
-	cert, err := tls.X509KeyPair(certPem, keyPem)
+	pemServerCA, err := os.ReadFile("cert/ca-cert.pem")
 	require.NoError(t, err)
-	cfg := &tls.Config{Certificates: []tls.Certificate{cert}}
 
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0).WithTLS(cfg)
-	bs := servertest.NewBufconnServer(options)
+	serverCert, err := tls.LoadX509KeyPair("cert/server-cert.pem", "cert/server-key.pem")
+	require.NoError(t, err)
 
-	bs.Start()
-	defer bs.Stop()
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(pemServerCA) {
+		panic("failed to add client CA's certificate")
+	}
 
-	defer os.RemoveAll(td)
+	cfg := &tls.Config{
+		RootCAs:      certPool,
+		Certificates: []tls.Certificate{serverCert},
+	}
+
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false).
+		WithTLS(cfg)
+
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err = srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=require user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=require user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
+
 	_, err = db.Exec(fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, title VARCHAR, content BLOB, PRIMARY KEY id)", table))
 	require.NoError(t, err)
 }
 
 func TestPgsqlServer_SSLNotEnabled(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=require user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=require user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
 	_, err = db.Exec(fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, title VARCHAR, content BLOB, PRIMARY KEY id)", table))
-	require.Error(t, err)
-
-}
-
-func _TestPgsqlServer_SimpleQueryAsynch(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
-
-	bs.Start()
-	defer bs.Stop()
-
-	defer os.RemoveAll(td)
-	defer os.Remove(".state-")
-
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
-	require.NoError(t, err)
-
-	table := getRandomTableName()
-	result, err := db.Exec(fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, title VARCHAR, content BLOB, PRIMARY KEY id)", table))
-	require.NoError(t, err)
-	require.NotNil(t, result)
-
-	_, err = db.Exec(fmt.Sprintf("UPSERT INTO %s (id, amount, title) VALUES (1, 200, 'title 1')", table))
-	require.NoError(t, err)
-
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func(c int) {
-			defer wg.Done()
-			var title string
-			var id int64
-			var amount int64
-			err = db.QueryRow(fmt.Sprintf("SELECT id, amount, title FROM %s", table)).Scan(&id, &amount, &title)
-			require.NoError(t, err)
-
-		}(i)
-	}
-	wg.Wait()
+	require.ErrorIs(t, err, pq.ErrSSLNotSupported)
 
 }
 
 func TestPgsqlServer_VersionStatement(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	var version string
-	err = db.QueryRow(fmt.Sprintf("SELECT version()")).Scan(&version)
+	err = db.QueryRow("SELECT version()").Scan(&version)
 	require.NoError(t, err)
-	require.Equal(t, pgmeta.PgsqlProtocolVersionMessage, version)
+	require.Equal(t, pgmeta.PgsqlServerVersionMessage, version)
+
+	_, err = db.Exec("DEALLOCATE \"_PLAN0x7fb2c0822800\"")
+	require.NoError(t, err)
 }
 
 func TestPgsqlServerSetStatement(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
-	_, err = db.Query(fmt.Sprintf("SET test=val"))
+	_, err = db.Query("SET test=val")
 	require.NoError(t, err)
 }
 
 func TestPgsqlServer_SimpleQueryNilValues(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -579,19 +824,34 @@ func getRandomTableName() string {
 }
 
 func TestPgsqlServer_ExtendedQueryPG(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -610,19 +870,34 @@ func TestPgsqlServer_ExtendedQueryPG(t *testing.T) {
 }
 
 func TestPgsqlServer_ExtendedQueryPGxNamedStatements(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	//db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=5432 sslmode=disable user=postgres dbname=postgres password=postgres"))
 
 	require.NoError(t, err)
@@ -644,19 +919,34 @@ func TestPgsqlServer_ExtendedQueryPGxNamedStatements(t *testing.T) {
 }
 
 func TestPgsqlServer_ExtendedQueryPGxMultiFieldsPreparedStatements(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 
 	require.NoError(t, err)
 	defer db.Close(context.Background())
@@ -688,19 +978,34 @@ func TestPgsqlServer_ExtendedQueryPGxMultiFieldsPreparedStatements(t *testing.T)
 }
 
 func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedStatements(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := sql.Open("postgres", fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -730,19 +1035,34 @@ func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedStatements(t *testing.T) 
 }
 
 func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedInsert(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -751,10 +1071,10 @@ func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedInsert(t *testing.T) {
 	require.NotNil(t, result)
 	binaryContent := []byte("my blob content1")
 	blobContent := hex.EncodeToString(binaryContent)
-	_, err = db.Exec(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table), 1, 1000, 6000, "title 1", fmt.Sprintf("%s", blobContent), true)
+	_, err = db.Exec(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table), 1, 1000, 6000, "title 1", blobContent, true)
 	require.NoError(t, err)
 	blobContent2 := hex.EncodeToString([]byte("my blob content2"))
-	_, err = db.Exec(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table), 2, 2000, 12000, "title 2", fmt.Sprintf("%s", blobContent2), true)
+	_, err = db.Exec(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table), 2, 2000, 12000, "title 2", blobContent2, true)
 	require.NoError(t, err)
 
 	var id int64
@@ -772,19 +1092,34 @@ func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedInsert(t *testing.T) {
 }
 
 func TestPgsqlServer_ExtendedQueryPGxMultiInsertStatements(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	//db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=5432 sslmode=disable user=postgres dbname=postgres password=postgres"))
 
 	require.NoError(t, err)
@@ -806,19 +1141,34 @@ func TestPgsqlServer_ExtendedQueryPGxMultiInsertStatements(t *testing.T) {
 }
 
 func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedMultiInsertError(t *testing.T) {
-	td, _ := ioutil.TempDir("", "_pgsql")
-	options := server.DefaultOptions().WithDir(td).WithPgsqlServer(true).WithPgsqlServerPort(0)
-	bs := servertest.NewBufconnServer(options)
+	td := t.TempDir()
 
-	bs.Start()
-	defer bs.Stop()
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
 
-	defer os.RemoveAll(td)
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
 	defer os.Remove(".state-")
 
-	bs.WaitForPgsqlListener()
-
-	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", bs.Server.Srv.PgsqlSrv.GetPort()))
+	db, err := pgx.Connect(context.Background(), fmt.Sprintf("host=localhost port=%d sslmode=disable user=immudb dbname=defaultdb password=immudb", srv.PgsqlSrv.GetPort()))
 	require.NoError(t, err)
 
 	table := getRandomTableName()
@@ -828,6 +1178,36 @@ func TestPgsqlServer_ExtendedQueryPGMultiFieldsPreparedMultiInsertError(t *testi
 	binaryContent := []byte("my blob content1")
 	blobContent2 := hex.EncodeToString([]byte("my blob content2"))
 	blobContent := hex.EncodeToString(binaryContent)
-	_, err = db.Exec(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?); INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table, table), 1, 1000, 6000, "title 1", fmt.Sprintf("%s", blobContent), true, 2, 2000, 12000, "title 2", fmt.Sprintf("%s", blobContent2), true)
-	require.Error(t, errors.ErrMaxStmtNumberExceeded)
+	_, err = db.Exec(context.Background(), fmt.Sprintf("INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?); INSERT INTO %s (id, amount, total, title, content, isPresent) VALUES (?, ?, ?, ?, ?, ?)", table, table), 1, 1000, 6000, "title 1", blobContent, true, 2, 2000, 12000, "title 2", blobContent2, true)
+	require.ErrorContains(t, err, errors.ErrMaxStmtNumberExceeded.Error())
+}
+
+func TestPgsqlServer_InvalidTraffic(t *testing.T) {
+	td := t.TempDir()
+
+	options := server.DefaultOptions().
+		WithDir(td).
+		WithPort(0).
+		WithPgsqlServer(true).
+		WithPgsqlServerPort(0).
+		WithMetricsServer(false).
+		WithWebServer(false)
+
+	srv := server.DefaultServer().WithOptions(options).(*server.ImmuServer)
+
+	err := srv.Initialize()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		srv.Start()
+	}()
+
+	defer func() {
+		srv.Stop()
+	}()
+
+	_, err = http.Get(fmt.Sprintf("http://localhost:%d", srv.PgsqlSrv.GetPort()))
+	require.Error(t, err)
 }

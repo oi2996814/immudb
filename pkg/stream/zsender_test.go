@@ -1,3 +1,19 @@
+/*
+Copyright 2024 Codenotary Inc. All rights reserved.
+
+SPDX-License-Identifier: BUSL-1.1
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://mariadb.com/bsl11/
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package stream
 
 import (
@@ -10,22 +26,23 @@ import (
 )
 
 type msgSenderMock struct {
-	SendF    func(io.Reader, int) error
+	SendF    func(io.Reader, int, map[string][]byte) error
 	RecvMsgF func(interface{}) error
 }
 
-func (msm *msgSenderMock) Send(reader io.Reader, payloadSize int) error {
-	return msm.SendF(reader, payloadSize)
+func (msm *msgSenderMock) Send(reader io.Reader, payloadSize int, metadata map[string][]byte) error {
+	return msm.SendF(reader, payloadSize, metadata)
 }
 func (msm *msgSenderMock) RecvMsg(m interface{}) error {
 	return msm.RecvMsgF(m)
 }
 
 func TestZSender(t *testing.T) {
+	errReceiveMsg := errors.New("receive msg error")
 	// EOF error
 	msm := msgSenderMock{
-		SendF:    func(io.Reader, int) error { return io.EOF },
-		RecvMsgF: func(interface{}) error { return errors.New("receive msg error") },
+		SendF:    func(io.Reader, int, map[string][]byte) error { return io.EOF },
+		RecvMsgF: func(interface{}) error { return errReceiveMsg },
 	}
 	zss := NewZStreamSender(&msm)
 
@@ -48,19 +65,18 @@ func TestZSender(t *testing.T) {
 	}
 
 	err = zss.Send(&zEntry)
-	require.Error(t, err)
-	require.Equal(t, errors.New("receive msg error"), err)
+	require.ErrorIs(t, err, errReceiveMsg)
 
+	errSend := errors.New("send error")
 	// other error
-	msm.SendF = func(io.Reader, int) error { return errors.New("send error") }
+	msm.SendF = func(io.Reader, int, map[string][]byte) error { return errSend }
 	msm.RecvMsgF = func(interface{}) error { return nil }
 	zss = NewZStreamSender(&msm)
 	err = zss.Send(&zEntry)
-	require.Error(t, err)
-	require.Equal(t, errors.New("send error"), err)
+	require.ErrorIs(t, err, errSend)
 
 	// no error
-	msm.SendF = func(io.Reader, int) error { return nil }
+	msm.SendF = func(io.Reader, int, map[string][]byte) error { return nil }
 	zss = NewZStreamSender(&msm)
 	err = zss.Send(&zEntry)
 	require.NoError(t, err)

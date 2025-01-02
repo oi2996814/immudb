@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -46,7 +46,9 @@ type ImmuClientMock struct {
 	VerifiedGetF          func(context.Context, []byte, ...client.GetOption) (*schema.Entry, error)
 	VerifiedGetAtF        func(context.Context, []byte, uint64) (*schema.Entry, error)
 	VerifiedSetF          func(context.Context, []byte, []byte) (*schema.TxHeader, error)
+	VerifiableGetF        func(context.Context, *schema.VerifiableGetRequest, ...grpc.CallOption) (*schema.VerifiableEntry, error)
 	SetF                  func(context.Context, []byte, []byte) (*schema.TxHeader, error)
+	SetAllF               func(context.Context, *schema.SetRequest) (*schema.TxHeader, error)
 	SetReferenceF         func(context.Context, []byte, []byte, uint64) (*schema.TxHeader, error)
 	VerifiedSetReferenceF func(context.Context, []byte, []byte, uint64) (*schema.TxHeader, error)
 	ZAddF                 func(context.Context, []byte, float64, []byte, uint64) (*schema.TxHeader, error)
@@ -128,9 +130,18 @@ func (icm *ImmuClientMock) VerifiedSet(ctx context.Context, key []byte, value []
 	return icm.VerifiedSetF(ctx, key, value)
 }
 
+// VerifiedSet ...
+func (icm *ImmuClientMock) VerifiableGet(ctx context.Context, in *schema.VerifiableGetRequest, opts ...grpc.CallOption) (*schema.VerifiableEntry, error) {
+	return icm.VerifiableGetF(ctx, in, opts...)
+}
+
 // Set ...
 func (icm *ImmuClientMock) Set(ctx context.Context, key []byte, value []byte) (*schema.TxHeader, error) {
 	return icm.SetF(ctx, key, value)
+}
+
+func (icm *ImmuClientMock) SetAll(ctx context.Context, req *schema.SetRequest) (*schema.TxHeader, error) {
+	return icm.SetAllF(ctx, req)
 }
 
 // SetReference ...

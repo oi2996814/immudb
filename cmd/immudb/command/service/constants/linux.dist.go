@@ -2,13 +2,13 @@
 // +build linux darwin
 
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -47,11 +47,11 @@ WantedBy=multi-user.target
 var UsageDet = fmt.Sprintf(`Config file is present in %s. Log file is in /var/log/immudb`, ConfigPath)
 
 // UsageExamples usage examples for linux
-var UsageExamples = fmt.Sprintf(`Install the immutable database
+var UsageExamples = `Install the immutable database
 sudo ./immudb service install    -  Installs the daemon
 sudo ./immudb service stop       -  Stops the daemon
 sudo ./immudb service start      -  Starts initialized daemon
 sudo ./immudb service restart    -  Restarts daemon
 sudo ./immudb service uninstall  -  Removes daemon and its setup
 Uninstall immudb after 20 second
-sudo ./immudb service install --time 20 immudb`)
+sudo ./immudb service install --time 20 immudb`

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,14 +30,15 @@ import (
 
 	"github.com/codenotary/immudb/pkg/signer"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/client/cache"
 	"github.com/codenotary/immudb/pkg/client/clienttest"
 	"github.com/codenotary/immudb/pkg/client/state"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 var dirname = "./test"
@@ -89,8 +90,7 @@ func TestDefaultAuditorPasswordDecodeErr(t *testing.T) {
 		func(string, string, bool, bool, bool, *schema.ImmutableState, *schema.ImmutableState) {},
 		logger.NewSimpleLogger("test", os.Stdout),
 		nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "illegal base64 data at input byte 0")
+	require.ErrorContains(t, err, "illegal base64 data at input byte 0")
 }
 
 func TestDefaultAuditorLoginErr(t *testing.T) {
@@ -110,7 +110,7 @@ func TestDefaultAuditorLoginErr(t *testing.T) {
 		time.Duration(0),
 		fmt.Sprintf("%s:%d", "address", 0),
 		[]grpc.DialOption{
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 		"immudb",
 		"immudb",
@@ -148,7 +148,7 @@ func TestDefaultAuditorDatabaseListErr(t *testing.T) {
 		time.Duration(0),
 		fmt.Sprintf("%s:%d", "address", 0),
 		[]grpc.DialOption{
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 		"immudb",
 		"immudb",
@@ -188,7 +188,7 @@ func TestDefaultAuditorDatabaseListEmpty(t *testing.T) {
 		time.Duration(0),
 		fmt.Sprintf("%s:%d", "address", 0),
 		[]grpc.DialOption{
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 		"immudb",
 		"immudb",
@@ -231,7 +231,7 @@ func TestDefaultAuditorUseDatabaseErr(t *testing.T) {
 		time.Duration(0),
 		fmt.Sprintf("%s:%d", "address", 0),
 		[]grpc.DialOption{
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 		"immudb",
 		"immudb",
@@ -277,7 +277,7 @@ func TestDefaultAuditorCurrentRootErr(t *testing.T) {
 		time.Duration(0),
 		fmt.Sprintf("%s:%d", "address", 0),
 		[]grpc.DialOption{
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 		"immudb",
 		"immudb",
@@ -351,7 +351,7 @@ func testDefaultAuditorRunOnDbWithInvalidSignature(t *testing.T, pk *ecdsa.Publi
 		time.Duration(0),
 		fmt.Sprintf("%s:%d", "address", 0),
 		[]grpc.DialOption{
-			grpc.WithInsecure(),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
 		},
 		"immudb",
 		"immudb",
@@ -367,9 +367,9 @@ func testDefaultAuditorRunOnDbWithInvalidSignature(t *testing.T, pk *ecdsa.Publi
 	require.NoError(t, err)
 
 	auditorDone := make(chan struct{}, 2)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
 }
 
@@ -421,14 +421,13 @@ func TestPublishAuditNotification(t *testing.T) {
 			Hash:      "hash-22",
 			Signature: Signature{Signature: "sig22", PublicKey: "pk22"}},
 	)
-	require.Error(t, err)
-	require.Contains(
+	require.ErrorContains(
 		t,
-		err.Error(),
+		err,
 		"POST http://some-non-existent-url.com request with payload")
-	require.Contains(
+	require.ErrorContains(
 		t,
-		err.Error(),
+		err,
 		"got unexpected response status Internal Server Error with response body Some error")
 	require.NotContains(t, err.Error(), notificationConfig.Password)
 
@@ -442,6 +441,5 @@ func TestPublishAuditNotification(t *testing.T) {
 		&State{Tx: 1111, Hash: "hash-1111"},
 		&State{Tx: 2222, Hash: "hash-2222"},
 	)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid control character in URL")
+	require.ErrorContains(t, err, "invalid control character in URL")
 }

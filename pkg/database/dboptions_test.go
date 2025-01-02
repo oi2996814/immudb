@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,33 +18,33 @@ package database
 
 import (
 	"testing"
+	"time"
 
 	"github.com/codenotary/immudb/embedded/store"
 	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultOptions(t *testing.T) {
-	op := DefaultOption().AsReplica(true)
+	op := DefaultOptions().AsReplica(true)
 
-	require.Equal(t, op.GetDBRootPath(), DefaultOption().dbRootPath)
-	require.False(t, op.GetCorruptionChecker())
-	require.Equal(t, op.GetTxPoolSize(), DefaultOption().readTxPoolSize)
+	require.Equal(t, op.GetDBRootPath(), DefaultOptions().dbRootPath)
+	require.Equal(t, op.GetTxPoolSize(), DefaultOptions().readTxPoolSize)
 	require.False(t, op.syncReplication)
 
 	rootpath := "rootpath"
 	storeOpts := store.DefaultOptions()
 
-	op = DefaultOption().
+	op = DefaultOptions().
 		WithDBRootPath(rootpath).
-		WithCorruptionChecker(true).
 		WithStoreOptions(storeOpts).
 		WithReadTxPoolSize(789).
-		WithSyncReplication(true)
+		WithSyncReplication(true).
+		WithTruncationFrequency(1 * time.Hour)
 
 	require.Equal(t, op.GetDBRootPath(), rootpath)
-	require.True(t, op.GetCorruptionChecker())
 	require.Equal(t, op.GetTxPoolSize(), 789)
 	require.True(t, op.syncReplication)
+	require.Equal(t, op.TruncationFrequency, 1*time.Hour)
 
 	require.Equal(t, storeOpts, op.storeOpts)
 }

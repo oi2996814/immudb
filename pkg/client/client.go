@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,16 +38,15 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/grpclog"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/embedded/store"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/auth"
 	"github.com/codenotary/immudb/pkg/client/cache"
 	"github.com/codenotary/immudb/pkg/client/errors"
-	"github.com/codenotary/immudb/pkg/client/heartbeater"
 	"github.com/codenotary/immudb/pkg/client/state"
 	"github.com/codenotary/immudb/pkg/client/tokenservice"
 	"github.com/codenotary/immudb/pkg/database"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/codenotary/immudb/pkg/signer"
 	"github.com/codenotary/immudb/pkg/stream"
 )
@@ -100,6 +99,8 @@ type ImmuClient interface {
 	// this call also allows the server to free up all resources allocated for a session
 	// (without explicit call, the server will only free resources after session inactivity timeout).
 	CloseSession(ctx context.Context) error
+
+	GetSessionID() string
 
 	// CreateUser creates new user with given credentials and permission.
 	//
@@ -343,6 +344,12 @@ type ImmuClient interface {
 	// If verification does not succeed the store.ErrCorruptedData error is returned.
 	VerifiedGetAtRevision(ctx context.Context, key []byte, rev int64) (*schema.Entry, error)
 
+	// VerifiableGet reads value for a given key, and returs internal data used to perform
+	// the verification.
+	//
+	// You can use this function if you want to have visibility on the verification data
+	VerifiableGet(ctx context.Context, in *schema.VerifiableGetRequest, opts ...grpc.CallOption) (*schema.VerifiableEntry, error)
+
 	// History returns history for a single key.
 	History(ctx context.Context, req *schema.HistoryRequest) (*schema.Entries, error)
 
@@ -476,14 +483,21 @@ type ImmuClient interface {
 	// ReplicateTx sends a previously serialized transaction object replicating it on another database.
 	ReplicateTx(ctx context.Context) (schema.ImmuService_ReplicateTxClient, error)
 
+	// StreamExportTx provides a bidirectional endpoint for retrieving serialized transactions
+	StreamExportTx(ctx context.Context, opts ...grpc.CallOption) (schema.ImmuService_StreamExportTxClient, error)
+
 	// SQLExec performs a modifying SQL query within the transaction.
 	// Such query does not return SQL result.
 	SQLExec(ctx context.Context, sql string, params map[string]interface{}) (*schema.SQLExecResult, error)
 
 	// SQLQuery performs a query (read-only) operation.
 	//
+	// Deprecated: use SQLQueryReader instead.
 	// The renewSnapshot parameter is deprecated and  is ignored by the server.
 	SQLQuery(ctx context.Context, sql string, params map[string]interface{}, renewSnapshot bool) (*schema.SQLQueryResult, error)
+
+	// SQLQueryReader submits an SQL query to the server and returns a reader object for efficient retrieval of all rows in the result set.
+	SQLQueryReader(ctx context.Context, sql string, params map[string]interface{}) (SQLQueryRowReader, error)
 
 	// ListTables returns a list of SQL tables.
 	ListTables(ctx context.Context) (*schema.SQLQueryResult, error)
@@ -504,8 +518,16 @@ type ImmuClient interface {
 	// NewTx starts a new transaction.
 	//
 	// Note: Currently such transaction can only be used for SQL operations.
-	NewTx(ctx context.Context) (Tx, error)
+	NewTx(ctx context.Context, opts ...TxOption) (Tx, error)
+
+	// TruncateDatabase truncates a database.
+	// This truncates the locally stored value log files used by the database.
+	//
+	// This call requires SysAdmin permission level or admin permission to the database.
+	TruncateDatabase(ctx context.Context, db string, retentionPeriod time.Duration) error
 }
+
+type ErrorHandler func(sessionID string, err error)
 
 const DefaultDB = "defaultdb"
 
@@ -520,7 +542,8 @@ type immuClient struct {
 	serverSigningPubKey  *ecdsa.PublicKey
 	StreamServiceFactory stream.ServiceFactory
 	SessionID            string
-	HeartBeater          heartbeater.HeartBeater
+	HeartBeater          HeartBeater
+	errorHandler         ErrorHandler
 }
 
 // Ensure immuClient implements the ImmuClient interface
@@ -563,6 +586,7 @@ func NewImmuClient(options *Options) (*immuClient, error) {
 	}
 
 	options.DialOptions = c.SetupDialOptions(options)
+
 	if db, err := c.Tkns.GetDatabase(); err == nil && len(db) > 0 {
 		options.CurrentDatabase = db
 	}
@@ -594,14 +618,32 @@ func NewImmuClient(options *Options) (*immuClient, error) {
 	stateProvider := state.NewStateProvider(serviceClient)
 	uuidProvider := state.NewUUIDProvider(serviceClient)
 
-	stateService, err := state.NewStateService(cache.NewFileCache(options.Dir), l, stateProvider, uuidProvider)
+	stateService, err := state.NewStateService(
+		cache.NewFileCache(options.Dir),
+		l,
+		stateProvider,
+		uuidProvider,
+	)
 	if err != nil {
 		return nil, logErr(l, "Unable to create state service: %s", err)
+	}
+
+	if !c.Options.DisableIdentityCheck {
+		stateService.SetServerIdentity(c.getServerIdentity())
 	}
 
 	c.WithStateService(stateService)
 
 	return c, nil
+}
+
+func (c *immuClient) debugElapsedTime(method string, start time.Time) {
+	c.Logger.Debugf("method immuclient.%s took %s", method, time.Since(start))
+}
+
+func (c *immuClient) getServerIdentity() string {
+	// TODO: Allow customizing this value
+	return c.Options.Bind()
 }
 
 // SetupDialOptions extracts grpc dial options from provided client options.
@@ -675,7 +717,13 @@ func (c *immuClient) SetupDialOptions(options *Options) []grpc.DialOption {
 		uic = append(uic, auth.ClientUnaryInterceptor(token))
 		if err == nil {
 			// todo here is possible to remove ClientUnaryInterceptor and use only tokenInterceptor
-			opts = append(opts, grpc.WithStreamInterceptor(auth.ClientStreamInterceptor(token)), grpc.WithStreamInterceptor(c.SessionIDInjectorStreamInterceptor))
+			opts = append(opts, grpc.WithStreamInterceptor(
+				grpc_middleware.ChainStreamClient(
+					c.TokenStreamInterceptor,
+					auth.ClientStreamInterceptor(token),
+					c.SessionIDInjectorStreamInterceptor,
+				)),
+			)
 		}
 	}
 	uic = append(uic, c.SessionIDInjectorInterceptor)
@@ -689,10 +737,12 @@ func (c *immuClient) SetupDialOptions(options *Options) []grpc.DialOption {
 //
 // Deprecated: use NewClient and OpenSession instead.
 func (c *immuClient) Connect(ctx context.Context) (clientConn *grpc.ClientConn, err error) {
+	c.Logger.Debugf("dialed %v", c.Options)
+
 	if c.clientConn, err = grpc.Dial(c.Options.Bind(), c.Options.DialOptions...); err != nil {
-		c.Logger.Debugf("dialed %v", c.Options)
 		return nil, err
 	}
+
 	return c.clientConn, nil
 }
 
@@ -948,7 +998,7 @@ func (c *immuClient) CurrentState(ctx context.Context) (*schema.ImmutableState, 
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("Current state finished in %s", time.Since(start))
+	defer c.debugElapsedTime("CurrentState", start)
 
 	return c.ServiceClient.CurrentState(ctx, &empty.Empty{})
 }
@@ -960,7 +1010,7 @@ func (c *immuClient) Get(ctx context.Context, key []byte, opts ...GetOption) (*s
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("get finished in %s", time.Since(start))
+	defer c.debugElapsedTime("Get", start)
 
 	req := &schema.KeyRequest{Key: key}
 	for _, opt := range opts {
@@ -994,7 +1044,7 @@ func (c *immuClient) GetAtRevision(ctx context.Context, key []byte, rev int64) (
 // Gets reads a single value for given key with additional server-provided proof validation.
 func (c *immuClient) VerifiedGet(ctx context.Context, key []byte, opts ...GetOption) (vi *schema.Entry, err error) {
 	start := time.Now()
-	defer c.Logger.Debugf("VerifiedGet finished in %s", time.Since(start))
+	defer c.debugElapsedTime("VerifiedGet", start)
 
 	req := &schema.KeyRequest{Key: key}
 	for _, opt := range opts {
@@ -1035,6 +1085,35 @@ func (c *immuClient) VerifiedGetAt(ctx context.Context, key []byte, tx uint64) (
 // If verification does not succeed the store.ErrCorruptedData error is returned.
 func (c *immuClient) VerifiedGetAtRevision(ctx context.Context, key []byte, rev int64) (vi *schema.Entry, err error) {
 	return c.VerifiedGet(ctx, key, AtRevision(rev))
+}
+
+func (c *immuClient) verifyDualProof(
+	ctx context.Context,
+	dualProof *store.DualProof,
+	sourceID uint64,
+	targetID uint64,
+	sourceAlh [sha256.Size]byte,
+	targetAlh [sha256.Size]byte,
+) error {
+	err := schema.FillMissingLinearAdvanceProof(
+		ctx, dualProof, sourceID, targetID, c.ServiceClient,
+	)
+	if err != nil {
+		return err
+	}
+
+	verifies := store.VerifyDualProof(
+		dualProof,
+		sourceID,
+		targetID,
+		sourceAlh,
+		targetAlh,
+	)
+	if !verifies {
+		return store.ErrCorruptedData
+	}
+
+	return nil
 }
 
 func (c *immuClient) verifiedGet(ctx context.Context, kReq *schema.KeyRequest) (vi *schema.Entry, err error) {
@@ -1120,15 +1199,16 @@ func (c *immuClient) verifiedGet(ctx context.Context, kReq *schema.KeyRequest) (
 	}
 
 	if state.TxId > 0 {
-		verifies = store.VerifyDualProof(
+		err := c.verifyDualProof(
+			ctx,
 			dualProof,
 			sourceID,
 			targetID,
 			sourceAlh,
 			targetAlh,
 		)
-		if !verifies {
-			return nil, store.ErrCorruptedData
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1140,12 +1220,9 @@ func (c *immuClient) verifiedGet(ctx context.Context, kReq *schema.KeyRequest) (
 	}
 
 	if c.serverSigningPubKey != nil {
-		ok, err := newState.CheckSignature(c.serverSigningPubKey)
+		err := newState.CheckSignature(c.serverSigningPubKey)
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, store.ErrCorruptedData
 		}
 	}
 
@@ -1205,16 +1282,16 @@ func (c *immuClient) set(ctx context.Context, key []byte, md *schema.KVMetadata,
 		return nil, errors.FromError(ErrNotConnected)
 	}
 
-	txmd, err := c.ServiceClient.Set(ctx, &schema.SetRequest{KVs: []*schema.KeyValue{{Key: key, Metadata: md, Value: value}}})
+	hdr, err := c.ServiceClient.Set(ctx, &schema.SetRequest{KVs: []*schema.KeyValue{{Key: key, Metadata: md, Value: value}}})
 	if err != nil {
 		return nil, err
 	}
 
-	if int(txmd.Nentries) != 1 {
+	if int(hdr.Nentries) != 1 {
 		return nil, store.ErrCorruptedData
 	}
 
-	return txmd, nil
+	return hdr, nil
 }
 
 // VerifiedSet commits a change of a value for a single key.
@@ -1234,7 +1311,7 @@ func (c *immuClient) VerifiedSet(ctx context.Context, key []byte, value []byte) 
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("VerifiedSet finished in %s", time.Since(start))
+	defer c.debugElapsedTime("VerifiedSet", start)
 
 	state, err := c.StateService.GetState(ctx, c.Options.CurrentDatabase)
 	if err != nil {
@@ -1299,16 +1376,17 @@ func (c *immuClient) VerifiedSet(ctx context.Context, key []byte, value []byte) 
 	targetAlh = tx.Header().Alh()
 
 	if state.TxId > 0 {
-		verifies = store.VerifyDualProof(
-			schema.DualProofFromProto(verifiableTx.DualProof),
+		dualProof := schema.DualProofFromProto(verifiableTx.DualProof)
+		err := c.verifyDualProof(
+			ctx,
+			dualProof,
 			sourceID,
 			targetID,
 			sourceAlh,
 			targetAlh,
 		)
-
-		if !verifies {
-			return nil, store.ErrCorruptedData
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1320,12 +1398,9 @@ func (c *immuClient) VerifiedSet(ctx context.Context, key []byte, value []byte) 
 	}
 
 	if c.serverSigningPubKey != nil {
-		ok, err := newState.CheckSignature(c.serverSigningPubKey)
+		err := newState.CheckSignature(c.serverSigningPubKey)
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, store.ErrCorruptedData
 		}
 	}
 
@@ -1358,16 +1433,16 @@ func (c *immuClient) SetAll(ctx context.Context, req *schema.SetRequest) (*schem
 		return nil, errors.FromError(ErrNotConnected)
 	}
 
-	txmd, err := c.ServiceClient.Set(ctx, req)
+	hdr, err := c.ServiceClient.Set(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
-	if int(txmd.Nentries) != len(req.KVs) {
+	if int(hdr.Nentries) != len(req.KVs) {
 		return nil, store.ErrCorruptedData
 	}
 
-	return txmd, nil
+	return hdr, nil
 }
 
 // ExecAll performs multiple write operations (values, references, sorted set entries)
@@ -1396,7 +1471,7 @@ func (c *immuClient) GetAll(ctx context.Context, keys [][]byte) (*schema.Entries
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("get-batch finished in %s", time.Since(start))
+	defer c.debugElapsedTime("GetAll", start)
 
 	keyList := &schema.KeyListRequest{}
 
@@ -1424,12 +1499,11 @@ func (c *immuClient) TxByID(ctx context.Context, tx uint64) (*schema.Tx, error) 
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("by-index finished in %s", time.Since(start))
+	defer c.debugElapsedTime("TxByID", start)
 
 	t, err := c.ServiceClient.TxById(ctx, &schema.TxRequest{
 		Tx: tx,
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -1462,7 +1536,7 @@ func (c *immuClient) VerifiedTxByID(ctx context.Context, tx uint64) (*schema.Tx,
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("VerifiedTxByID finished in %s", time.Since(start))
+	defer c.debugElapsedTime("VerifiedTxByID", start)
 
 	state, err := c.StateService.GetState(ctx, c.Options.CurrentDatabase)
 	if err != nil {
@@ -1495,15 +1569,16 @@ func (c *immuClient) VerifiedTxByID(ctx context.Context, tx uint64) (*schema.Tx,
 	}
 
 	if state.TxId > 0 {
-		verifies := store.VerifyDualProof(
+		err := c.verifyDualProof(
+			ctx,
 			dualProof,
 			sourceID,
 			targetID,
 			sourceAlh,
 			targetAlh,
 		)
-		if !verifies {
-			return nil, store.ErrCorruptedData
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1515,12 +1590,9 @@ func (c *immuClient) VerifiedTxByID(ctx context.Context, tx uint64) (*schema.Tx,
 	}
 
 	if c.serverSigningPubKey != nil {
-		ok, err := newState.CheckSignature(c.serverSigningPubKey)
+		err := newState.CheckSignature(c.serverSigningPubKey)
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, store.ErrCorruptedData
 		}
 	}
 
@@ -1550,7 +1622,7 @@ func (c *immuClient) History(ctx context.Context, req *schema.HistoryRequest) (s
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("history finished in %s", time.Since(start))
+	defer c.debugElapsedTime("History", start)
 
 	return c.ServiceClient.History(ctx, req)
 }
@@ -1571,7 +1643,7 @@ func (c *immuClient) SetReferenceAt(ctx context.Context, key []byte, referencedK
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("SetReference finished in %s", time.Since(start))
+	defer c.debugElapsedTime("SetReferenceAt", start)
 
 	txhdr, err := c.ServiceClient.SetReference(ctx, &schema.ReferenceRequest{
 		Key:           key,
@@ -1614,7 +1686,7 @@ func (c *immuClient) VerifiedSetReferenceAt(ctx context.Context, key []byte, ref
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("safereference finished in %s", time.Since(start))
+	defer c.debugElapsedTime("VerifiedSetReferenceAt", start)
 
 	state, err := c.StateService.GetState(ctx, c.Options.CurrentDatabase)
 	if err != nil {
@@ -1677,15 +1749,17 @@ func (c *immuClient) VerifiedSetReferenceAt(ctx context.Context, key []byte, ref
 	targetAlh = tx.Header().Alh()
 
 	if state.TxId > 0 {
-		verifies = store.VerifyDualProof(
-			schema.DualProofFromProto(verifiableTx.DualProof),
+		dualProof := schema.DualProofFromProto(verifiableTx.DualProof)
+		err := c.verifyDualProof(
+			ctx,
+			dualProof,
 			sourceID,
 			targetID,
 			sourceAlh,
 			targetAlh,
 		)
-		if !verifies {
-			return nil, store.ErrCorruptedData
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1697,12 +1771,9 @@ func (c *immuClient) VerifiedSetReferenceAt(ctx context.Context, key []byte, ref
 	}
 
 	if c.serverSigningPubKey != nil {
-		ok, err := newState.CheckSignature(c.serverSigningPubKey)
+		err := newState.CheckSignature(c.serverSigningPubKey)
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, store.ErrCorruptedData
 		}
 	}
 
@@ -1730,9 +1801,9 @@ func (c *immuClient) ZAddAt(ctx context.Context, set []byte, score float64, key 
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("zadd finished in %s", time.Since(start))
+	defer c.debugElapsedTime("ZAddAt", start)
 
-	txmd, err := c.ServiceClient.ZAdd(ctx, &schema.ZAddRequest{
+	hdr, err := c.ServiceClient.ZAdd(ctx, &schema.ZAddRequest{
 		Set:      set,
 		Score:    score,
 		Key:      key,
@@ -1743,11 +1814,11 @@ func (c *immuClient) ZAddAt(ctx context.Context, set []byte, score float64, key 
 		return nil, err
 	}
 
-	if int(txmd.Nentries) != 1 {
+	if int(hdr.Nentries) != 1 {
 		return nil, store.ErrCorruptedData
 	}
 
-	return txmd, nil
+	return hdr, nil
 }
 
 // VerifiedZAdd adds a new entry to sorted set.
@@ -1780,7 +1851,7 @@ func (c *immuClient) VerifiedZAddAt(ctx context.Context, set []byte, score float
 	}
 
 	start := time.Now()
-	defer c.Logger.Debugf("safezadd finished in %s", time.Since(start))
+	defer c.debugElapsedTime("VerifiedZAddAt", start)
 
 	state, err := c.StateService.GetState(ctx, c.Options.CurrentDatabase)
 	if err != nil {
@@ -1848,15 +1919,17 @@ func (c *immuClient) VerifiedZAddAt(ctx context.Context, set []byte, score float
 	targetAlh = tx.Header().Alh()
 
 	if state.TxId > 0 {
-		verifies = store.VerifyDualProof(
-			schema.DualProofFromProto(vtx.DualProof),
+		dualProof := schema.DualProofFromProto(vtx.DualProof)
+		err := c.verifyDualProof(
+			ctx,
+			dualProof,
 			sourceID,
 			targetID,
 			sourceAlh,
 			targetAlh,
 		)
-		if !verifies {
-			return nil, store.ErrCorruptedData
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -1868,12 +1941,9 @@ func (c *immuClient) VerifiedZAddAt(ctx context.Context, set []byte, score float
 	}
 
 	if c.serverSigningPubKey != nil {
-		ok, err := newState.CheckSignature(c.serverSigningPubKey)
+		err := newState.CheckSignature(c.serverSigningPubKey)
 		if err != nil {
 			return nil, err
-		}
-		if !ok {
-			return nil, store.ErrCorruptedData
 		}
 	}
 
@@ -2237,33 +2307,35 @@ func (c *immuClient) DatabaseListV2(ctx context.Context) (*schema.DatabaseListRe
 	return c.ServiceClient.DatabaseListV2(ctx, &schema.DatabaseListRequestV2{})
 }
 
-// Deprecated: Please use CurrentState.
-func (c *immuClient) CurrentRoot(ctx context.Context) (*schema.ImmutableState, error) {
-	return c.CurrentState(ctx)
-}
-
-// Deprecated: Please use VerifiedSet.
-func (c *immuClient) SafeSet(ctx context.Context, key []byte, value []byte) (*schema.TxHeader, error) {
-	return c.VerifiedSet(ctx, key, value)
-}
-
-// Deprecated: Please use VerifiedGet.
-func (c *immuClient) SafeGet(ctx context.Context, key []byte, opts ...grpc.CallOption) (*schema.Entry, error) {
-	return c.VerifiedGet(ctx, key)
-}
-
-// Deprecated: Please use VerifiedZAdd.
-func (c *immuClient) SafeZAdd(ctx context.Context, set []byte, score float64, key []byte) (*schema.TxHeader, error) {
-	return c.VerifiedZAdd(ctx, set, score, key)
-}
-
-// Deprecated: Please use VerifiedSetReference.
-func (c *immuClient) SafeReference(ctx context.Context, key []byte, referencedKey []byte) (*schema.TxHeader, error) {
-	return c.VerifiedSetReference(ctx, key, referencedKey)
-}
-
 func decodeTxEntries(entries []*schema.TxEntry) {
 	for _, it := range entries {
 		it.Key = it.Key[1:]
 	}
+}
+
+// TruncateDatabase truncates the database to the given retention period.
+func (c *immuClient) TruncateDatabase(ctx context.Context, db string, retentionPeriod time.Duration) error {
+	start := time.Now()
+
+	if !c.IsConnected() {
+		return ErrNotConnected
+	}
+
+	in := &schema.TruncateDatabaseRequest{
+		Database:        db,
+		RetentionPeriod: retentionPeriod.Milliseconds(),
+	}
+
+	_, err := c.ServiceClient.TruncateDatabase(ctx, in)
+
+	c.Logger.Debugf("TruncateDatabase finished in %s", time.Since(start))
+
+	return err
+}
+
+// VerifiableGet
+func (c *immuClient) VerifiableGet(ctx context.Context, in *schema.VerifiableGetRequest, opts ...grpc.CallOption) (*schema.VerifiableEntry, error) {
+	result, err := c.ServiceClient.VerifiableGet(ctx, in, opts...)
+
+	return result, err
 }

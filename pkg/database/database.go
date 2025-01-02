@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,28 +28,31 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codenotary/immudb/embedded/document"
 	"github.com/codenotary/immudb/embedded/sql"
 	"github.com/codenotary/immudb/embedded/store"
-	"github.com/codenotary/immudb/embedded/watchers"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/api/schema"
-	"github.com/codenotary/immudb/pkg/logger"
+	"github.com/codenotary/immudb/pkg/pgsql/pgschema"
 )
 
-const MaxKeyResolutionLimit = 1
-const MaxKeyScanLimit = 1000
+const (
+	MaxKeyResolutionLimit = 1
+	MaxKeyScanLimit       = 2500
+)
 
-const dbInstanceName = "dbinstance"
-
-var ErrKeyResolutionLimitReached = errors.New("key resolution limit reached. It may be due to cyclic references")
-var ErrResultSizeLimitExceeded = errors.New("result size limit exceeded")
-var ErrResultSizeLimitReached = errors.New("result size limit reached")
-var ErrIllegalArguments = store.ErrIllegalArguments
-var ErrIllegalState = store.ErrIllegalState
-var ErrIsReplica = errors.New("database is read-only because it's a replica")
-var ErrNotReplica = errors.New("database is NOT a replica")
-var ErrFollowerDivergedFromMaster = errors.New("follower diverged from master")
-var ErrInvalidRevision = errors.New("invalid key revision number")
+var (
+	ErrKeyResolutionLimitReached  = errors.New("key resolution limit reached. It may be due to cyclic references")
+	ErrResultSizeLimitExceeded    = errors.New("result size limit exceeded")
+	ErrResultSizeLimitReached     = errors.New("result size limit reached")
+	ErrIllegalArguments           = store.ErrIllegalArguments
+	ErrIllegalState               = store.ErrIllegalState
+	ErrIsReplica                  = errors.New("database is read-only because it's a replica")
+	ErrNotReplica                 = errors.New("database is NOT a replica")
+	ErrReplicaDivergedFromPrimary = errors.New("replica diverged from primary")
+	ErrInvalidRevision            = errors.New("invalid key revision number")
+)
 
 type DB interface {
 	GetName() string
@@ -66,7 +69,6 @@ type DB interface {
 	SetSyncReplication(enabled bool)
 
 	MaxResultSize() int
-	UseTimeFunc(timeFunc store.TimeFunc) error
 
 	// State
 	Health() (waitingCount int, lastReleaseAt time.Time)
@@ -74,62 +76,70 @@ type DB interface {
 
 	Size() (uint64, error)
 
+	TxCount() (uint64, error)
+
 	// Key-Value
-	Set(req *schema.SetRequest) (*schema.TxHeader, error)
-	VerifiableSet(req *schema.VerifiableSetRequest) (*schema.VerifiableTx, error)
+	Set(ctx context.Context, req *schema.SetRequest) (*schema.TxHeader, error)
+	VerifiableSet(ctx context.Context, req *schema.VerifiableSetRequest) (*schema.VerifiableTx, error)
 
-	Get(req *schema.KeyRequest) (*schema.Entry, error)
-	VerifiableGet(req *schema.VerifiableGetRequest) (*schema.VerifiableEntry, error)
-	GetAll(req *schema.KeyListRequest) (*schema.Entries, error)
+	Get(ctx context.Context, req *schema.KeyRequest) (*schema.Entry, error)
+	VerifiableGet(ctx context.Context, req *schema.VerifiableGetRequest) (*schema.VerifiableEntry, error)
+	GetAll(ctx context.Context, req *schema.KeyListRequest) (*schema.Entries, error)
 
-	Delete(req *schema.DeleteKeysRequest) (*schema.TxHeader, error)
+	Delete(ctx context.Context, req *schema.DeleteKeysRequest) (*schema.TxHeader, error)
 
-	SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error)
-	VerifiableSetReference(req *schema.VerifiableReferenceRequest) (*schema.VerifiableTx, error)
+	SetReference(ctx context.Context, req *schema.ReferenceRequest) (*schema.TxHeader, error)
+	VerifiableSetReference(ctx context.Context, req *schema.VerifiableReferenceRequest) (*schema.VerifiableTx, error)
 
-	Scan(req *schema.ScanRequest) (*schema.Entries, error)
+	Scan(ctx context.Context, req *schema.ScanRequest) (*schema.Entries, error)
 
-	History(req *schema.HistoryRequest) (*schema.Entries, error)
+	History(ctx context.Context, req *schema.HistoryRequest) (*schema.Entries, error)
 
-	ExecAll(operations *schema.ExecAllRequest) (*schema.TxHeader, error)
+	ExecAll(ctx context.Context, operations *schema.ExecAllRequest) (*schema.TxHeader, error)
 
-	Count(prefix *schema.KeyPrefix) (*schema.EntryCount, error)
-	CountAll() (*schema.EntryCount, error)
+	Count(ctx context.Context, prefix *schema.KeyPrefix) (*schema.EntryCount, error)
+	CountAll(ctx context.Context) (*schema.EntryCount, error)
 
-	ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error)
-	VerifiableZAdd(req *schema.VerifiableZAddRequest) (*schema.VerifiableTx, error)
-	ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error)
+	ZAdd(ctx context.Context, req *schema.ZAddRequest) (*schema.TxHeader, error)
+	VerifiableZAdd(ctx context.Context, req *schema.VerifiableZAddRequest) (*schema.VerifiableTx, error)
+	ZScan(ctx context.Context, req *schema.ZScanRequest) (*schema.ZEntries, error)
 
 	// SQL-related
-	NewSQLTx(ctx context.Context) (*sql.SQLTx, error)
+	NewSQLTx(ctx context.Context, opts *sql.TxOptions) (*sql.SQLTx, error)
 
-	SQLExec(req *schema.SQLExecRequest, tx *sql.SQLTx) (ntx *sql.SQLTx, ctxs []*sql.SQLTx, err error)
-	SQLExecPrepared(stmts []sql.SQLStmt, params map[string]interface{}, tx *sql.SQLTx) (ntx *sql.SQLTx, ctxs []*sql.SQLTx, err error)
+	SQLExec(ctx context.Context, tx *sql.SQLTx, req *schema.SQLExecRequest) (ntx *sql.SQLTx, ctxs []*sql.SQLTx, err error)
+	SQLExecPrepared(ctx context.Context, tx *sql.SQLTx, stmts []sql.SQLStmt, params map[string]interface{}) (ntx *sql.SQLTx, ctxs []*sql.SQLTx, err error)
 
-	InferParameters(sql string, tx *sql.SQLTx) (map[string]sql.SQLValueType, error)
-	InferParametersPrepared(stmt sql.SQLStmt, tx *sql.SQLTx) (map[string]sql.SQLValueType, error)
+	InferParameters(ctx context.Context, tx *sql.SQLTx, sql string) (map[string]sql.SQLValueType, error)
+	InferParametersPrepared(ctx context.Context, tx *sql.SQLTx, stmt sql.SQLStmt) (map[string]sql.SQLValueType, error)
 
-	SQLQuery(req *schema.SQLQueryRequest, tx *sql.SQLTx) (*schema.SQLQueryResult, error)
-	SQLQueryPrepared(stmt sql.DataSource, namedParams []*schema.NamedParam, tx *sql.SQLTx) (*schema.SQLQueryResult, error)
-	SQLQueryRowReader(stmt sql.DataSource, params map[string]interface{}, tx *sql.SQLTx) (sql.RowReader, error)
+	SQLQuery(ctx context.Context, tx *sql.SQLTx, req *schema.SQLQueryRequest) (sql.RowReader, error)
+	SQLQueryAll(ctx context.Context, tx *sql.SQLTx, req *schema.SQLQueryRequest) ([]*sql.Row, error)
+	SQLQueryPrepared(ctx context.Context, tx *sql.SQLTx, stmt sql.DataSource, params map[string]interface{}) (sql.RowReader, error)
 
-	VerifiableSQLGet(req *schema.VerifiableSQLGetRequest) (*schema.VerifiableSQLEntry, error)
+	VerifiableSQLGet(ctx context.Context, req *schema.VerifiableSQLGetRequest) (*schema.VerifiableSQLEntry, error)
 
-	ListTables(tx *sql.SQLTx) (*schema.SQLQueryResult, error)
-	DescribeTable(table string, tx *sql.SQLTx) (*schema.SQLQueryResult, error)
+	CopySQLCatalog(ctx context.Context, txID uint64) (uint64, error)
+
+	ListTables(ctx context.Context, tx *sql.SQLTx) (*schema.SQLQueryResult, error)
+	DescribeTable(ctx context.Context, tx *sql.SQLTx, table string) (*schema.SQLQueryResult, error)
 
 	// Transactional layer
-	WaitForTx(txID uint64, allowPrecommitted bool, cancellation <-chan struct{}) error
-	WaitForIndexingUpto(txID uint64, cancellation <-chan struct{}) error
+	WaitForTx(ctx context.Context, txID uint64, allowPrecommitted bool) error
+	WaitForIndexingUpto(ctx context.Context, txID uint64) error
 
-	TxByID(req *schema.TxRequest) (*schema.Tx, error)
-	ExportTxByID(req *schema.ExportTxRequest) (txbs []byte, mayCommitUpToTxID uint64, mayCommitUpToAlh [sha256.Size]byte, err error)
-	ReplicateTx(exportedTx []byte) (*schema.TxHeader, error)
+	TxByID(ctx context.Context, req *schema.TxRequest) (*schema.Tx, error)
+	ExportTxByID(ctx context.Context, req *schema.ExportTxRequest) (txbs []byte, mayCommitUpToTxID uint64, mayCommitUpToAlh [sha256.Size]byte, err error)
+	ReplicateTx(ctx context.Context, exportedTx []byte, skipIntegrityCheck bool, waitForIndexing bool) (*schema.TxHeader, error)
 	AllowCommitUpto(txID uint64, alh [sha256.Size]byte) error
 	DiscardPrecommittedTxsSince(txID uint64) error
 
-	VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.VerifiableTx, error)
-	TxScan(req *schema.TxScanRequest) (*schema.TxList, error)
+	VerifiableTxByID(ctx context.Context, req *schema.VerifiableTxRequest) (*schema.VerifiableTx, error)
+	TxScan(ctx context.Context, req *schema.TxScanRequest) (*schema.TxList, error)
+
+	// Truncation
+	FindTruncationPoint(ctx context.Context, until time.Time) (*schema.TxHeader, error)
+	TruncateUptoTx(ctx context.Context, txID uint64) error
 
 	// Maintenance
 	FlushIndex(req *schema.FlushIndexRequest) error
@@ -137,11 +147,11 @@ type DB interface {
 
 	IsClosed() bool
 	Close() error
+
+	DocumentDatabase
 }
 
-type uuid = string
-
-type followerState struct {
+type replicaState struct {
 	precommittedTxID uint64
 	precommittedAlh  [sha256.Size]byte
 }
@@ -150,9 +160,8 @@ type followerState struct {
 type db struct {
 	st *store.ImmuStore
 
-	sqlEngine     *sql.Engine
-	sqlInitCancel chan (struct{})
-	sqlInit       sync.WaitGroup
+	sqlEngine      *sql.Engine
+	documentEngine *document.Engine
 
 	mutex        *instrumentedRWMutex
 	closingMutex sync.Mutex
@@ -166,31 +175,36 @@ type db struct {
 
 	txPool store.TxPool
 
-	followerStates      map[uuid]*followerState
-	followerStatesMutex sync.Mutex
+	replicaStates      map[string]*replicaState
+	replicaStatesMutex sync.Mutex
 }
 
 // OpenDB Opens an existing Database from disk
-func OpenDB(dbName string, multidbHandler sql.MultiDBHandler, op *Options, log logger.Logger) (DB, error) {
+func OpenDB(
+	dbName string,
+	multidbHandler sql.MultiDBHandler,
+	opts *Options,
+	log logger.Logger,
+) (DB, error) {
 	if dbName == "" {
 		return nil, fmt.Errorf("%w: invalid database name provided '%s'", ErrIllegalArguments, dbName)
 	}
 
-	log.Infof("Opening database '%s' {replica = %v}...", dbName, op.replica)
+	log.Infof("opening database '%s' {replica = %v}...", dbName, opts.replica)
 
-	var followerStates map[uuid]*followerState
-	// follower states are only managed in master with synchronous replication
-	if !op.replica && op.syncAcks > 0 {
-		followerStates = make(map[uuid]*followerState, op.syncAcks)
+	var replicaStates map[string]*replicaState
+	// replica states are only managed in primary with synchronous replication
+	if !opts.replica && opts.syncAcks > 0 {
+		replicaStates = make(map[string]*replicaState, opts.syncAcks)
 	}
 
 	dbi := &db{
-		Logger:         log,
-		options:        op,
-		name:           dbName,
-		followerStates: followerStates,
-		maxResultSize:  MaxKeyScanLimit,
-		mutex:          &instrumentedRWMutex{},
+		Logger:        log,
+		options:       opts,
+		name:          dbName,
+		replicaStates: replicaStates,
+		maxResultSize: opts.maxResultSize,
+		mutex:         &instrumentedRWMutex{},
 	}
 
 	dbDir := dbi.Path()
@@ -199,55 +213,76 @@ func OpenDB(dbName string, multidbHandler sql.MultiDBHandler, op *Options, log l
 		return nil, fmt.Errorf("missing database directories: %s", dbDir)
 	}
 
-	stOpts := op.GetStoreOptions().
+	stOpts := opts.GetStoreOptions().
 		WithLogger(log).
-		WithExternalCommitAllowance(op.syncReplication)
+		WithMultiIndexing(true).
+		WithExternalCommitAllowance(opts.syncReplication)
 
 	dbi.st, err = store.Open(dbDir, stOpts)
 	if err != nil {
-		return nil, logErr(dbi.Logger, "Unable to open database: %s", err)
+		return nil, logErr(dbi.Logger, "unable to open database: %s", err)
 	}
 
-	dbi.sqlEngine, err = sql.NewEngine(dbi.st, sql.DefaultOptions().WithPrefix([]byte{SQLPrefix}))
+	for _, prefix := range []byte{SetKeyPrefix, SortedSetKeyPrefix} {
+		err := dbi.st.InitIndexing(&store.IndexSpec{
+			SourcePrefix: []byte{prefix},
+			TargetPrefix: []byte{prefix},
+		})
+		if err != nil {
+			dbi.st.Close()
+			return nil, logErr(dbi.Logger, "unable to open database: %s", err)
+		}
+	}
+
+	dbi.Logger.Infof("loading sql-engine for database '%s' {replica = %v}...", dbName, opts.replica)
+
+	sqlOpts := sql.DefaultOptions().
+		WithPrefix([]byte{SQLPrefix}).
+		WithMultiDBHandler(multidbHandler).
+		WithParseTxMetadataFunc(parseTxMetadata).
+		WithTableResolvers(pgschema.PgCatalogResolvers()...)
+
+	dbi.sqlEngine, err = sql.NewEngine(dbi.st, sqlOpts)
 	if err != nil {
+		dbi.Logger.Errorf("unable to load sql-engine for database '%s' {replica = %v}. %v", dbName, opts.replica, err)
 		return nil, err
 	}
 
-	txPool, err := dbi.st.NewTxHolderPool(op.readTxPoolSize, false)
+	dbi.Logger.Infof("sql-engine ready for database '%s' {replica = %v}", dbName, opts.replica)
+
+	dbi.documentEngine, err = document.NewEngine(dbi.st, document.DefaultOptions().WithPrefix([]byte{DocumentPrefix}))
 	if err != nil {
-		return nil, logErr(dbi.Logger, "Unable to create tx pool: %s", err)
+		return nil, err
+	}
+	dbi.Logger.Infof("document-engine ready for database '%s' {replica = %v}", dbName, opts.replica)
+
+	txPool, err := dbi.st.NewTxHolderPool(opts.readTxPoolSize, false)
+	if err != nil {
+		return nil, logErr(dbi.Logger, "unable to create tx pool: %s", err)
 	}
 	dbi.txPool = txPool
 
-	if op.replica {
-		dbi.sqlEngine.SetMultiDBHandler(multidbHandler)
-
-		dbi.Logger.Infof("Database '%s' {replica = %v} successfully opened", dbName, op.replica)
+	if opts.replica {
+		dbi.Logger.Infof("database '%s' {replica = %v} successfully opened", dbName, opts.replica)
 		return dbi, nil
 	}
 
-	dbi.sqlInitCancel = make(chan struct{})
-	dbi.sqlInit.Add(1)
-
-	go func() {
-		defer dbi.sqlInit.Done()
-
-		dbi.Logger.Infof("Loading SQL Engine for database '%s' {replica = %v}...", dbName, op.replica)
-
-		err := dbi.initSQLEngine()
-		if err != nil {
-			dbi.Logger.Errorf("Unable to load SQL Engine for database '%s' {replica = %v}. %v", dbName, op.replica, err)
-			return
-		}
-
-		dbi.sqlEngine.SetMultiDBHandler(multidbHandler)
-
-		dbi.Logger.Infof("SQL Engine ready for database '%s' {replica = %v}", dbName, op.replica)
-	}()
-
-	dbi.Logger.Infof("Database '%s' {replica = %v} successfully opened", dbName, op.replica)
+	dbi.Logger.Infof("database '%s' {replica = %v} successfully opened", dbName, opts.replica)
 
 	return dbi, nil
+}
+
+func parseTxMetadata(data []byte) (map[string]interface{}, error) {
+	md := schema.Metadata{}
+	if err := md.Unmarshal(data); err != nil {
+		return nil, err
+	}
+
+	meta := make(map[string]interface{}, len(md))
+	for k, v := range md {
+		meta[k] = v
+	}
+	return meta, nil
 }
 
 func (d *db) Path() string {
@@ -266,95 +301,89 @@ func (d *db) releaseTx(tx *store.Tx) {
 	d.txPool.Release(tx)
 }
 
-func (d *db) initSQLEngine() error {
-	err := d.sqlEngine.SetCurrentDatabase(dbInstanceName)
-	if err != nil && err != sql.ErrDatabaseDoesNotExist {
-		return err
-	}
-
-	if err == sql.ErrDatabaseDoesNotExist {
-		return fmt.Errorf("automatic SQL initialization of databases created with older versions is now disabled. " +
-			"Please reach out to the immudb maintainers at the Discord channel if you need any assistance")
-	}
-
-	return nil
-}
-
 // NewDB Creates a new Database along with it's directories and files
-func NewDB(dbName string, multidbHandler sql.MultiDBHandler, op *Options, log logger.Logger) (DB, error) {
+func NewDB(dbName string, multidbHandler sql.MultiDBHandler, opts *Options, log logger.Logger) (DB, error) {
 	if dbName == "" {
 		return nil, fmt.Errorf("%w: invalid database name provided '%s'", ErrIllegalArguments, dbName)
 	}
 
-	log.Infof("Creating database '%s' {replica = %v}...", dbName, op.replica)
+	log.Infof("creating database '%s' {replica = %v}...", dbName, opts.replica)
 
-	var followerStates map[uuid]*followerState
-	// follower states are only managed in master with synchronous replication
-	if !op.replica && op.syncAcks > 0 {
-		followerStates = make(map[uuid]*followerState, op.syncAcks)
+	var replicaStates map[string]*replicaState
+	// replica states are only managed in primary with synchronous replication
+	if !opts.replica && opts.syncAcks > 0 {
+		replicaStates = make(map[string]*replicaState, opts.syncAcks)
 	}
 
 	dbi := &db{
-		Logger:         log,
-		options:        op,
-		name:           dbName,
-		followerStates: followerStates,
-		maxResultSize:  MaxKeyScanLimit,
-		mutex:          &instrumentedRWMutex{},
+		Logger:        log,
+		options:       opts,
+		name:          dbName,
+		replicaStates: replicaStates,
+		maxResultSize: opts.maxResultSize,
+		mutex:         &instrumentedRWMutex{},
 	}
 
-	dbDir := filepath.Join(op.GetDBRootPath(), dbName)
+	dbDir := filepath.Join(opts.GetDBRootPath(), dbName)
 
 	_, err := os.Stat(dbDir)
 	if err == nil {
-		return nil, fmt.Errorf("Database directories already exist: %s", dbDir)
+		return nil, fmt.Errorf("database directories already exist: %s", dbDir)
 	}
 
 	if err = os.MkdirAll(dbDir, os.ModePerm); err != nil {
-		return nil, logErr(dbi.Logger, "Unable to create data folder: %s", err)
+		return nil, logErr(dbi.Logger, "unable to create data folder: %s", err)
 	}
 
-	stOpts := op.GetStoreOptions().WithLogger(log)
-	// TODO: it's not currently possible to set:
-	// WithExternalCommitAllowance(op.syncReplication) due to sql init steps
+	stOpts := opts.GetStoreOptions().
+		WithExternalCommitAllowance(opts.syncReplication).
+		WithMultiIndexing(true).
+		WithLogger(log)
 
 	dbi.st, err = store.Open(dbDir, stOpts)
 	if err != nil {
-		return nil, logErr(dbi.Logger, "Unable to open database: %s", err)
+		return nil, logErr(dbi.Logger, "unable to open database: %s", err)
 	}
 
-	// TODO: may be moved to store opts once sql init steps are removed
-	defer func() {
-		dbi.st.SetExternalCommitAllowance(op.syncReplication)
-	}()
+	for _, prefix := range []byte{SetKeyPrefix, SortedSetKeyPrefix} {
+		err := dbi.st.InitIndexing(&store.IndexSpec{
+			SourcePrefix: []byte{prefix},
+			TargetPrefix: []byte{prefix},
+		})
+		if err != nil {
+			dbi.st.Close()
+			return nil, logErr(dbi.Logger, "unable to open database: %s", err)
+		}
+	}
 
-	txPool, err := dbi.st.NewTxHolderPool(op.readTxPoolSize, false)
+	txPool, err := dbi.st.NewTxHolderPool(opts.readTxPoolSize, false)
 	if err != nil {
-		return nil, logErr(dbi.Logger, "Unable to create tx pool: %s", err)
+		return nil, logErr(dbi.Logger, "unable to create tx pool: %s", err)
 	}
 	dbi.txPool = txPool
 
-	dbi.sqlEngine, err = sql.NewEngine(dbi.st, sql.DefaultOptions().WithPrefix([]byte{SQLPrefix}))
+	sqlOpts := sql.DefaultOptions().
+		WithPrefix([]byte{SQLPrefix}).
+		WithMultiDBHandler(multidbHandler).
+		WithParseTxMetadataFunc(parseTxMetadata).
+		WithTableResolvers(pgschema.PgCatalogResolvers()...)
+
+	dbi.Logger.Infof("loading sql-engine for database '%s' {replica = %v}...", dbName, opts.replica)
+
+	dbi.sqlEngine, err = sql.NewEngine(dbi.st, sqlOpts)
+	if err != nil {
+		dbi.Logger.Errorf("unable to load sql-engine for database '%s' {replica = %v}. %v", dbName, opts.replica, err)
+		return nil, err
+	}
+	dbi.Logger.Infof("sql-engine ready for database '%s' {replica = %v}", dbName, opts.replica)
+
+	dbi.documentEngine, err = document.NewEngine(dbi.st, document.DefaultOptions().WithPrefix([]byte{DocumentPrefix}))
 	if err != nil {
 		return nil, logErr(dbi.Logger, "Unable to open database: %s", err)
 	}
+	dbi.Logger.Infof("document-engine ready for database '%s' {replica = %v}", dbName, opts.replica)
 
-	if !op.replica {
-		// TODO: get rid off this sql initialization
-		_, _, err = dbi.sqlEngine.ExecPreparedStmts([]sql.SQLStmt{&sql.CreateDatabaseStmt{DB: dbInstanceName}}, nil, nil)
-		if err != nil {
-			return nil, logErr(dbi.Logger, "Unable to open database: %s", err)
-		}
-
-		err = dbi.sqlEngine.SetCurrentDatabase(dbInstanceName)
-		if err != nil {
-			return nil, logErr(dbi.Logger, "Unable to open database: %s", err)
-		}
-	}
-
-	dbi.sqlEngine.SetMultiDBHandler(multidbHandler)
-
-	dbi.Logger.Infof("Database '%s' successfully created {replica = %v}", dbName, op.replica)
+	dbi.Logger.Infof("database '%s' successfully created {replica = %v}", dbName, opts.replica)
 
 	return dbi, nil
 }
@@ -363,26 +392,20 @@ func (d *db) MaxResultSize() int {
 	return d.maxResultSize
 }
 
-// UseTimeFunc ...
-func (d *db) UseTimeFunc(timeFunc store.TimeFunc) error {
-	return d.st.UseTimeFunc(timeFunc)
-}
-
 func (d *db) FlushIndex(req *schema.FlushIndexRequest) error {
 	if req == nil {
 		return store.ErrIllegalArguments
 	}
-
-	return d.st.FlushIndex(req.CleanupPercentage, req.Synced)
+	return d.st.FlushIndexes(req.CleanupPercentage, req.Synced)
 }
 
 // CompactIndex ...
 func (d *db) CompactIndex() error {
-	return d.st.CompactIndex()
+	return d.st.CompactIndexes()
 }
 
 // Set ...
-func (d *db) Set(req *schema.SetRequest) (*schema.TxHeader, error) {
+func (d *db) Set(ctx context.Context, req *schema.SetRequest) (*schema.TxHeader, error) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 
@@ -390,15 +413,15 @@ func (d *db) Set(req *schema.SetRequest) (*schema.TxHeader, error) {
 		return nil, ErrIsReplica
 	}
 
-	return d.set(req)
+	return d.set(ctx, req)
 }
 
-func (d *db) set(req *schema.SetRequest) (*schema.TxHeader, error) {
+func (d *db) set(ctx context.Context, req *schema.SetRequest) (*schema.TxHeader, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
 
-	tx, err := d.st.NewWriteOnlyTx()
+	tx, err := d.newWriteOnlyTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +454,6 @@ func (d *db) set(req *schema.SetRequest) (*schema.TxHeader, error) {
 	}
 
 	for i := range req.Preconditions {
-
 		c, err := PreconditionFromProto(req.Preconditions[i])
 		if err != nil {
 			return nil, err
@@ -446,15 +468,49 @@ func (d *db) set(req *schema.SetRequest) (*schema.TxHeader, error) {
 	var hdr *store.TxHeader
 
 	if req.NoWait {
-		hdr, err = tx.AsyncCommit()
+		hdr, err = tx.AsyncCommit(ctx)
 	} else {
-		hdr, err = tx.Commit()
+		hdr, err = tx.Commit(ctx)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	return schema.TxHeaderToProto(hdr), nil
+}
+
+func (d *db) newWriteOnlyTx(ctx context.Context) (*store.OngoingTx, error) {
+	tx, err := d.st.NewWriteOnlyTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return d.txWithMetadata(ctx, tx)
+}
+
+func (d *db) newTx(ctx context.Context, opts *store.TxOptions) (*store.OngoingTx, error) {
+	tx, err := d.st.NewTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return d.txWithMetadata(ctx, tx)
+}
+
+func (d *db) txWithMetadata(ctx context.Context, tx *store.OngoingTx) (*store.OngoingTx, error) {
+	meta := schema.MetadataFromContext(ctx)
+	if len(meta) > 0 {
+		txmd := store.NewTxMetadata()
+
+		data, err := meta.Marshal()
+		if err != nil {
+			return nil, err
+		}
+
+		if err := txmd.WithExtra(data); err != nil {
+			return nil, err
+		}
+		return tx.WithMetadata(txmd), nil
+	}
+	return tx, nil
 }
 
 func checkKeyRequest(req *schema.KeyRequest) error {
@@ -492,7 +548,7 @@ func checkKeyRequest(req *schema.KeyRequest) error {
 }
 
 // Get ...
-func (d *db) Get(req *schema.KeyRequest) (*schema.Entry, error) {
+func (d *db) Get(ctx context.Context, req *schema.KeyRequest) (*schema.Entry, error) {
 	err := checkKeyRequest(req)
 	if err != nil {
 		return nil, err
@@ -512,65 +568,78 @@ func (d *db) Get(req *schema.KeyRequest) (*schema.Entry, error) {
 			waitUntilTx = currTxID
 		}
 
-		err := d.WaitForIndexingUpto(waitUntilTx, nil)
+		err := d.WaitForIndexingUpto(ctx, waitUntilTx)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if req.AtRevision != 0 {
-		return d.getAtRevision(EncodeKey(req.Key), req.AtRevision)
+		return d.getAtRevision(ctx, EncodeKey(req.Key), req.AtRevision, true)
 	}
 
-	return d.getAtTx(EncodeKey(req.Key), req.AtTx, 0, d.st, 0)
+	return d.getAtTx(ctx, EncodeKey(req.Key), req.AtTx, 0, d.st, 0, true)
 }
 
-func (d *db) get(key []byte, index store.KeyIndex) (*schema.Entry, error) {
-	return d.getAtTx(key, 0, 0, index, 0)
+func (d *db) get(ctx context.Context, key []byte, index store.KeyIndex, skipIntegrityCheck bool) (*schema.Entry, error) {
+	return d.getAtTx(ctx, key, 0, 0, index, 0, skipIntegrityCheck)
 }
 
 func (d *db) getAtTx(
+	ctx context.Context,
 	key []byte,
 	atTx uint64,
 	resolved int,
 	index store.KeyIndex,
 	revision uint64,
+	skipIntegrityCheck bool,
 ) (entry *schema.Entry, err error) {
+
 	var txID uint64
 	var val []byte
 	var md *store.KVMetadata
 
 	if atTx == 0 {
-		valRef, err := index.Get(key)
+		valRef, err := index.Get(ctx, key)
 		if err != nil {
 			return nil, err
 		}
 
 		txID = valRef.Tx()
-
+		revision = valRef.HC()
 		md = valRef.KVMetadata()
 
 		val, err = valRef.Resolve()
 		if err != nil {
 			return nil, err
 		}
-
-		// Revision can be calculated from the history count
-		revision = valRef.HC()
-
 	} else {
 		txID = atTx
 
-		md, val, err = d.readMetadataAndValue(key, atTx)
+		md, val, err = d.readMetadataAndValue(key, atTx, skipIntegrityCheck)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return d.resolveValue(key, val, resolved, txID, md, index, revision)
+	return d.resolveValue(ctx, key, val, resolved, txID, md, index, revision, skipIntegrityCheck)
 }
 
-func (d *db) getAtRevision(key []byte, atRevision int64) (entry *schema.Entry, err error) {
+func (d *db) readMetadataAndValue(key []byte, atTx uint64, skipIntegrityCheck bool) (*store.KVMetadata, []byte, error) {
+	entry, _, err := d.st.ReadTxEntry(atTx, key, skipIntegrityCheck)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	v, err := d.st.ReadValue(entry)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return entry.Metadata(), v, nil
+}
+
+func (d *db) getAtRevision(ctx context.Context, key []byte, atRevision int64, skipIntegrityCheck bool) (entry *schema.Entry, err error) {
 	var offset uint64
 	var desc bool
 
@@ -582,7 +651,7 @@ func (d *db) getAtRevision(key []byte, atRevision int64) (entry *schema.Entry, e
 		desc = true
 	}
 
-	txs, hCount, err := d.st.History(key, offset, desc, 1)
+	valRefs, hCount, err := d.st.History(key, offset, desc, 1)
 	if errors.Is(err, store.ErrNoMoreEntries) || errors.Is(err, store.ErrOffsetOutOfRange) {
 		return nil, ErrInvalidRevision
 	}
@@ -594,7 +663,7 @@ func (d *db) getAtRevision(key []byte, atRevision int64) (entry *schema.Entry, e
 		atRevision = int64(hCount) + atRevision
 	}
 
-	entry, err = d.getAtTx(key, txs[0], 0, d.st, uint64(atRevision))
+	entry, err = d.getAtTx(ctx, key, valRefs[0].Tx(), 0, d.st, uint64(atRevision), skipIntegrityCheck)
 	if err != nil {
 		return nil, err
 	}
@@ -603,6 +672,7 @@ func (d *db) getAtRevision(key []byte, atRevision int64) (entry *schema.Entry, e
 }
 
 func (d *db) resolveValue(
+	ctx context.Context,
 	key []byte,
 	val []byte,
 	resolved int,
@@ -610,26 +680,22 @@ func (d *db) resolveValue(
 	md *store.KVMetadata,
 	index store.KeyIndex,
 	revision uint64,
+	skipIntegrityCheck bool,
 ) (entry *schema.Entry, err error) {
 	if md != nil && md.Deleted() {
 		return nil, store.ErrKeyNotFound
 	}
 
 	if len(val) < 1 {
-		return nil, fmt.Errorf(
-			"%w: internal value consistency error - missing value prefix",
-			store.ErrCorruptedData,
-		)
+		return nil, fmt.Errorf("%w: internal value consistency error - missing value prefix", store.ErrCorruptedData)
 	}
 
 	// Reference lookup
 	if val[0] == ReferenceValuePrefix {
 		if len(val) < 1+8 {
-			return nil, fmt.Errorf(
-				"%w: internal value consistency error - invalid reference",
-				store.ErrCorruptedData,
-			)
+			return nil, fmt.Errorf("%w: internal value consistency error - invalid reference", store.ErrCorruptedData)
 		}
+
 		if resolved == MaxKeyResolutionLimit {
 			return nil, ErrKeyResolutionLimitReached
 		}
@@ -639,7 +705,7 @@ func (d *db) resolveValue(
 		copy(refKey, val[1+8:])
 
 		if index != nil {
-			entry, err = d.getAtTx(refKey, atTx, resolved+1, index, 0)
+			entry, err = d.getAtTx(ctx, refKey, atTx, resolved+1, index, 0, skipIntegrityCheck)
 			if err != nil {
 				return nil, err
 			}
@@ -670,20 +736,6 @@ func (d *db) resolveValue(
 	}, nil
 }
 
-func (d *db) readMetadataAndValue(key []byte, atTx uint64) (*store.KVMetadata, []byte, error) {
-	entry, _, err := d.st.ReadTxEntry(atTx, key)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	v, err := d.st.ReadValue(entry)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return entry.Metadata(), v, nil
-}
-
 func (d *db) Health() (waitingCount int, lastReleaseAt time.Time) {
 	return d.mutex.State()
 }
@@ -702,17 +754,17 @@ func (d *db) CurrentState() (*schema.ImmutableState, error) {
 }
 
 // WaitForTx blocks caller until specified tx
-func (d *db) WaitForTx(txID uint64, allowPrecommitted bool, cancellation <-chan struct{}) error {
-	return d.st.WaitForTx(txID, allowPrecommitted, cancellation)
+func (d *db) WaitForTx(ctx context.Context, txID uint64, allowPrecommitted bool) error {
+	return d.st.WaitForTx(ctx, txID, allowPrecommitted)
 }
 
 // WaitForIndexingUpto blocks caller until specified tx gets indexed
-func (d *db) WaitForIndexingUpto(txID uint64, cancellation <-chan struct{}) error {
-	return d.st.WaitForIndexingUpto(txID, cancellation)
+func (d *db) WaitForIndexingUpto(ctx context.Context, txID uint64) error {
+	return d.st.WaitForIndexingUpto(ctx, txID)
 }
 
 // VerifiableSet ...
-func (d *db) VerifiableSet(req *schema.VerifiableSetRequest) (*schema.VerifiableTx, error) {
+func (d *db) VerifiableSet(ctx context.Context, req *schema.VerifiableSetRequest) (*schema.VerifiableTx, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -729,12 +781,12 @@ func (d *db) VerifiableSet(req *schema.VerifiableSetRequest) (*schema.Verifiable
 	}
 	defer d.releaseTx(lastTx)
 
-	txhdr, err := d.Set(req.SetRequest)
+	txhdr, err := d.Set(ctx, req.SetRequest)
 	if err != nil {
 		return nil, err
 	}
 
-	err = d.st.ReadTx(uint64(txhdr.Id), lastTx)
+	err = d.st.ReadTx(uint64(txhdr.Id), false, lastTx)
 	if err != nil {
 		return nil, err
 	}
@@ -744,7 +796,7 @@ func (d *db) VerifiableSet(req *schema.VerifiableSetRequest) (*schema.Verifiable
 	if req.ProveSinceTx == 0 {
 		prevTxHdr = lastTx.Header()
 	} else {
-		prevTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false)
+		prevTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -762,7 +814,7 @@ func (d *db) VerifiableSet(req *schema.VerifiableSetRequest) (*schema.Verifiable
 }
 
 // VerifiableGet ...
-func (d *db) VerifiableGet(req *schema.VerifiableGetRequest) (*schema.VerifiableEntry, error) {
+func (d *db) VerifiableGet(ctx context.Context, req *schema.VerifiableGetRequest) (*schema.VerifiableEntry, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -772,7 +824,7 @@ func (d *db) VerifiableGet(req *schema.VerifiableGetRequest) (*schema.Verifiable
 		return nil, ErrIllegalState
 	}
 
-	e, err := d.Get(req.KeyRequest)
+	e, err := d.Get(ctx, req.KeyRequest)
 	if err != nil {
 		return nil, err
 	}
@@ -795,7 +847,7 @@ func (d *db) VerifiableGet(req *schema.VerifiableGetRequest) (*schema.Verifiable
 	}
 	defer d.releaseTx(tx)
 
-	err = d.st.ReadTx(vTxID, tx)
+	err = d.st.ReadTx(vTxID, false, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -805,7 +857,7 @@ func (d *db) VerifiableGet(req *schema.VerifiableGetRequest) (*schema.Verifiable
 	if req.ProveSinceTx == 0 {
 		rootTxHdr = tx.Header()
 	} else {
-		rootTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false)
+		rootTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -843,7 +895,7 @@ func (d *db) VerifiableGet(req *schema.VerifiableGetRequest) (*schema.Verifiable
 	}, nil
 }
 
-func (d *db) Delete(req *schema.DeleteKeysRequest) (*schema.TxHeader, error) {
+func (d *db) Delete(ctx context.Context, req *schema.DeleteKeysRequest) (*schema.TxHeader, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -855,23 +907,19 @@ func (d *db) Delete(req *schema.DeleteKeysRequest) (*schema.TxHeader, error) {
 		return nil, ErrIsReplica
 	}
 
-	currTxID, _ := d.st.CommittedAlh()
+	opts := store.DefaultTxOptions()
 
-	if req.SinceTx > currTxID {
-		return nil, ErrIllegalArguments
+	if req.SinceTx > 0 {
+		if req.SinceTx > d.st.LastPrecommittedTxID() {
+			return nil, store.ErrTxNotFound
+		}
+
+		opts.WithSnapshotMustIncludeTxID(func(_ uint64) uint64 {
+			return req.SinceTx
+		})
 	}
 
-	waitUntilTx := req.SinceTx
-	if waitUntilTx == 0 {
-		waitUntilTx = currTxID
-	}
-
-	err := d.WaitForIndexingUpto(waitUntilTx, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	tx, err := d.st.NewTx()
+	tx, err := d.newTx(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -888,7 +936,7 @@ func (d *db) Delete(req *schema.DeleteKeysRequest) (*schema.TxHeader, error) {
 
 		e := EncodeEntrySpec(k, md, nil)
 
-		err = tx.Delete(e.Key)
+		err = tx.Delete(ctx, e.Key)
 		if err != nil {
 			return nil, err
 		}
@@ -896,9 +944,9 @@ func (d *db) Delete(req *schema.DeleteKeysRequest) (*schema.TxHeader, error) {
 
 	var hdr *store.TxHeader
 	if req.NoWait {
-		hdr, err = tx.AsyncCommit()
+		hdr, err = tx.AsyncCommit(ctx)
 	} else {
-		hdr, err = tx.Commit()
+		hdr, err = tx.Commit(ctx)
 	}
 	if err != nil {
 		return nil, err
@@ -908,34 +956,18 @@ func (d *db) Delete(req *schema.DeleteKeysRequest) (*schema.TxHeader, error) {
 }
 
 // GetAll ...
-func (d *db) GetAll(req *schema.KeyListRequest) (*schema.Entries, error) {
-	currTxID, _ := d.st.CommittedAlh()
-
-	if req.SinceTx > currTxID {
-		return nil, ErrIllegalArguments
-	}
-
-	waitUntilTx := req.SinceTx
-	if waitUntilTx == 0 {
-		waitUntilTx = currTxID
-	}
-
-	err := d.WaitForIndexingUpto(waitUntilTx, nil)
+func (d *db) GetAll(ctx context.Context, req *schema.KeyListRequest) (*schema.Entries, error) {
+	snap, err := d.snapshotSince(ctx, []byte{SetKeyPrefix}, req.SinceTx)
 	if err != nil {
 		return nil, err
 	}
-
-	snapshot, err := d.st.SnapshotSince(waitUntilTx)
-	if err != nil {
-		return nil, err
-	}
-	defer snapshot.Close()
+	defer snap.Close()
 
 	list := &schema.Entries{}
 
 	for _, key := range req.Keys {
-		e, err := d.get(EncodeKey(key), snapshot)
-		if err == nil || err == store.ErrKeyNotFound {
+		e, err := d.get(ctx, EncodeKey(key), snap, true)
+		if err == nil || errors.Is(err, store.ErrKeyNotFound) {
 			if e != nil {
 				list.Entries = append(list.Entries, e)
 			}
@@ -947,23 +979,59 @@ func (d *db) GetAll(req *schema.KeyListRequest) (*schema.Entries, error) {
 	return list, nil
 }
 
-// Size ...
 func (d *db) Size() (uint64, error) {
+	return d.st.Size()
+}
+
+// TxCount ...
+func (d *db) TxCount() (uint64, error) {
 	return d.st.TxCount(), nil
 }
 
 // Count ...
-func (d *db) Count(prefix *schema.KeyPrefix) (*schema.EntryCount, error) {
-	return nil, fmt.Errorf("Functionality not yet supported: %s", "Count")
+func (d *db) Count(ctx context.Context, prefix *schema.KeyPrefix) (*schema.EntryCount, error) {
+	if prefix == nil {
+		return nil, ErrIllegalArguments
+	}
+
+	tx, err := d.st.NewTx(ctx, store.DefaultTxOptions().WithMode(store.ReadOnlyTx))
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Cancel()
+
+	keyReader, err := tx.NewKeyReader(store.KeyReaderSpec{
+		Prefix: WrapWithPrefix(prefix.Prefix, SetKeyPrefix),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer keyReader.Close()
+
+	count := 0
+
+	for {
+		_, _, err := keyReader.Read(ctx)
+		if errors.Is(err, store.ErrNoMoreEntries) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		count++
+	}
+
+	return &schema.EntryCount{Count: uint64(count)}, nil
 }
 
 // CountAll ...
-func (d *db) CountAll() (*schema.EntryCount, error) {
-	return nil, fmt.Errorf("Functionality not yet supported: %s", "Count")
+func (d *db) CountAll(ctx context.Context) (*schema.EntryCount, error) {
+	return d.Count(ctx, &schema.KeyPrefix{})
 }
 
 // TxByID ...
-func (d *db) TxByID(req *schema.TxRequest) (*schema.Tx, error) {
+func (d *db) TxByID(ctx context.Context, req *schema.TxRequest) (*schema.Tx, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -978,7 +1046,7 @@ func (d *db) TxByID(req *schema.TxRequest) (*schema.Tx, error) {
 	defer d.releaseTx(tx)
 
 	if !req.KeepReferencesUnresolved {
-		snap, err = d.snapshotSince(req.SinceTx, req.NoWait)
+		snap, err = d.snapshotSince(ctx, []byte{SetKeyPrefix}, req.SinceTx)
 		if err != nil {
 			return nil, err
 		}
@@ -986,15 +1054,15 @@ func (d *db) TxByID(req *schema.TxRequest) (*schema.Tx, error) {
 	}
 
 	// key-value inclusion proof
-	err = d.st.ReadTx(req.Tx, tx)
+	err = d.st.ReadTx(req.Tx, false, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	return d.serializeTx(tx, req.EntriesSpec, snap)
+	return d.serializeTx(ctx, tx, req.EntriesSpec, snap, true)
 }
 
-func (d *db) snapshotSince(txID uint64, noWait bool) (*store.Snapshot, error) {
+func (d *db) snapshotSince(ctx context.Context, prefix []byte, txID uint64) (*store.Snapshot, error) {
 	currTxID, _ := d.st.CommittedAlh()
 
 	if txID > currTxID {
@@ -1006,17 +1074,10 @@ func (d *db) snapshotSince(txID uint64, noWait bool) (*store.Snapshot, error) {
 		waitUntilTx = currTxID
 	}
 
-	if !noWait {
-		err := d.st.WaitForIndexingUpto(waitUntilTx, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return d.st.SnapshotSince(waitUntilTx)
+	return d.st.SnapshotMustIncludeTxID(ctx, prefix, waitUntilTx)
 }
 
-func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Snapshot) (*schema.Tx, error) {
+func (d *db) serializeTx(ctx context.Context, tx *store.Tx, spec *schema.EntriesSpec, snap *store.Snapshot, skipIntegrityCheck bool) (*schema.Tx, error) {
 	if spec == nil {
 		return schema.TxToProto(tx), nil
 	}
@@ -1039,7 +1100,7 @@ func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Sna
 				}
 
 				v, err := d.st.ReadValue(e)
-				if err == store.ErrExpiredEntry {
+				if errors.Is(err, store.ErrExpiredEntry) {
 					break
 				}
 				if err != nil {
@@ -1059,10 +1120,9 @@ func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Sna
 					index = snap
 				}
 
-				kve, err := d.resolveValue(e.Key(), v, 0, tx.Header().ID, e.Metadata(), index, 0)
-				if err == store.ErrKeyNotFound || err == store.ErrExpiredEntry {
-					// ignore deleted ones (referenced key may have been deleted)
-					break
+				kve, err := d.resolveValue(ctx, e.Key(), v, 0, tx.Header().ID, e.Metadata(), index, 0, skipIntegrityCheck)
+				if errors.Is(err, store.ErrKeyNotFound) || errors.Is(err, store.ErrExpiredEntry) {
+					break // ignore deleted ones (referenced key may have been deleted)
 				}
 				if err != nil {
 					return nil, err
@@ -1083,7 +1143,7 @@ func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Sna
 
 				if spec.ZEntriesSpec.Action == schema.EntryTypeAction_RAW_VALUE {
 					v, err := d.st.ReadValue(e)
-					if err == store.ErrExpiredEntry {
+					if errors.Is(err, store.ErrExpiredEntry) {
 						break
 					}
 					if err != nil {
@@ -1117,10 +1177,9 @@ func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Sna
 				var err error
 
 				if snap != nil {
-					entry, err = d.getAtTx(key, atTx, 1, snap, 0)
-					if err == store.ErrKeyNotFound || err == store.ErrExpiredEntry {
-						// ignore deleted ones (referenced key may have been deleted)
-						break
+					entry, err = d.getAtTx(ctx, key, atTx, 1, snap, 0, skipIntegrityCheck)
+					if errors.Is(err, store.ErrKeyNotFound) || errors.Is(err, store.ErrExpiredEntry) {
+						break // ignore deleted ones (referenced key may have been deleted)
 					}
 					if err != nil {
 						return nil, err
@@ -1150,7 +1209,7 @@ func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Sna
 
 				if spec.SqlEntriesSpec.Action == schema.EntryTypeAction_RAW_VALUE {
 					v, err := d.st.ReadValue(e)
-					if err == store.ErrExpiredEntry {
+					if errors.Is(err, store.ErrExpiredEntry) {
 						break
 					}
 					if err != nil {
@@ -1171,57 +1230,57 @@ func (d *db) serializeTx(tx *store.Tx, spec *schema.EntriesSpec, snap *store.Sna
 	return stx, nil
 }
 
-func (d *db) mayUpdateFollowerState(committedTxID uint64, newFollowerState *schema.FollowerState) error {
-	d.followerStatesMutex.Lock()
-	defer d.followerStatesMutex.Unlock()
+func (d *db) mayUpdateReplicaState(committedTxID uint64, newReplicaState *schema.ReplicaState) error {
+	d.replicaStatesMutex.Lock()
+	defer d.replicaStatesMutex.Unlock()
 
-	// clean up followerStates
-	// it's safe to remove up to latest tx committed in master
-	for uuid, st := range d.followerStates {
+	// clean up replicaStates
+	// it's safe to remove up to latest tx committed in primary
+	for uuid, st := range d.replicaStates {
 		if st.precommittedTxID <= committedTxID {
-			delete(d.followerStates, uuid)
+			delete(d.replicaStates, uuid)
 		}
 	}
 
-	if newFollowerState.PrecommittedTxID <= committedTxID {
-		// as far as the master is concerned, nothing really new has happened
+	if newReplicaState.PrecommittedTxID <= committedTxID {
+		// as far as the primary is concerned, nothing really new has happened
 		return nil
 	}
 
-	newFollowerAlh := schema.DigestFromProto(newFollowerState.PrecommittedAlh)
+	newReplicaAlh := schema.DigestFromProto(newReplicaState.PrecommittedAlh)
 
-	followerSt, ok := d.followerStates[newFollowerState.UUID]
+	replicaSt, ok := d.replicaStates[newReplicaState.UUID]
 	if ok {
-		if newFollowerState.PrecommittedTxID < followerSt.precommittedTxID {
-			return fmt.Errorf("%w: the newly informed follower state lags behind the previously informed one", ErrIllegalArguments)
+		if newReplicaState.PrecommittedTxID < replicaSt.precommittedTxID {
+			return fmt.Errorf("%w: the newly informed replica state lags behind the previously informed one", ErrIllegalArguments)
 		}
 
-		if newFollowerState.PrecommittedTxID == followerSt.precommittedTxID {
-			// as of the last informed follower status update, nothing has changed
+		if newReplicaState.PrecommittedTxID == replicaSt.precommittedTxID {
+			// as of the last informed replica status update, nothing has changed
 			return nil
 		}
 
-		// actual replication progress is informed by the follower
-		followerSt.precommittedTxID = newFollowerState.PrecommittedTxID
-		followerSt.precommittedAlh = newFollowerAlh
+		// actual replication progress is informed by the replica
+		replicaSt.precommittedTxID = newReplicaState.PrecommittedTxID
+		replicaSt.precommittedAlh = newReplicaAlh
 	} else {
-		// follower informs first replication state
-		d.followerStates[newFollowerState.UUID] = &followerState{
-			precommittedTxID: newFollowerState.PrecommittedTxID,
-			precommittedAlh:  newFollowerAlh,
+		// replica informs first replication state
+		d.replicaStates[newReplicaState.UUID] = &replicaState{
+			precommittedTxID: newReplicaState.PrecommittedTxID,
+			precommittedAlh:  newReplicaAlh,
 		}
 	}
 
-	// check up to which tx enough followers ack replication and it's safe to commit
+	// check up to which tx enough replicas ack replication and it's safe to commit
 	mayCommitUpToTxID := uint64(0)
-	if len(d.followerStates) > 0 {
+	if len(d.replicaStates) > 0 {
 		mayCommitUpToTxID = math.MaxUint64
 	}
 
 	allowances := 0
 
-	// we may clean up followerStates from those who are lagging behind commit
-	for _, st := range d.followerStates {
+	// we may clean up replicaStates from those who are lagging behind commit
+	for _, st := range d.replicaStates {
 		if st.precommittedTxID < mayCommitUpToTxID {
 			mayCommitUpToTxID = st.precommittedTxID
 		}
@@ -1238,14 +1297,13 @@ func (d *db) mayUpdateFollowerState(committedTxID uint64, newFollowerState *sche
 	return nil
 }
 
-func (d *db) ExportTxByID(req *schema.ExportTxRequest) (txbs []byte, mayCommitUpToTxID uint64, mayCommitUpToAlh [sha256.Size]byte, err error) {
-
+func (d *db) ExportTxByID(ctx context.Context, req *schema.ExportTxRequest) (txbs []byte, mayCommitUpToTxID uint64, mayCommitUpToAlh [sha256.Size]byte, err error) {
 	if req == nil {
 		return nil, 0, mayCommitUpToAlh, ErrIllegalArguments
 	}
 
-	if d.followerStates == nil && req.FollowerState != nil {
-		return nil, 0, mayCommitUpToAlh, fmt.Errorf("%w: follower state was NOT expected", ErrIllegalState)
+	if d.replicaStates == nil && req.ReplicaState != nil {
+		return nil, 0, mayCommitUpToAlh, fmt.Errorf("%w: replica state was NOT expected", ErrIllegalState)
 	}
 
 	tx, err := d.allocTx()
@@ -1257,83 +1315,85 @@ func (d *db) ExportTxByID(req *schema.ExportTxRequest) (txbs []byte, mayCommitUp
 	committedTxID, committedAlh := d.st.CommittedAlh()
 	preCommittedTxID, _ := d.st.PrecommittedAlh()
 
-	if req.FollowerState != nil {
-		if req.FollowerState.CommittedTxID > 0 {
-			// validate follower commit state
-			if req.FollowerState.CommittedTxID > committedTxID {
-				return nil, committedTxID, committedAlh,
-					fmt.Errorf("%w: follower commit state diverged from master's", ErrFollowerDivergedFromMaster)
+	if req.ReplicaState != nil {
+		if req.ReplicaState.CommittedTxID > 0 {
+			// validate replica commit state
+			if req.ReplicaState.CommittedTxID > committedTxID {
+				return nil, committedTxID, committedAlh, fmt.Errorf("%w: replica commit state diverged from primary's", ErrReplicaDivergedFromPrimary)
 			}
 
-			expectedFollowerCommitHdr, err := d.st.ReadTxHeader(req.FollowerState.CommittedTxID, false)
+			// integrityCheck is currently required to validate Alh
+			expectedReplicaCommitHdr, err := d.st.ReadTxHeader(req.ReplicaState.CommittedTxID, false, false)
 			if err != nil {
 				return nil, committedTxID, committedAlh, err
 			}
 
-			followerCommittedAlh := schema.DigestFromProto(req.FollowerState.CommittedAlh)
+			replicaCommittedAlh := schema.DigestFromProto(req.ReplicaState.CommittedAlh)
 
-			if expectedFollowerCommitHdr.Alh() != followerCommittedAlh {
-				return nil, expectedFollowerCommitHdr.ID, expectedFollowerCommitHdr.Alh(),
-					fmt.Errorf("%w: follower commit state diverged from master's", ErrFollowerDivergedFromMaster)
+			if expectedReplicaCommitHdr.Alh() != replicaCommittedAlh {
+				return nil, expectedReplicaCommitHdr.ID, expectedReplicaCommitHdr.Alh(), fmt.Errorf("%w: replica commit state diverged from primary's", ErrReplicaDivergedFromPrimary)
 			}
 		}
 
-		if req.FollowerState.PrecommittedTxID > 0 {
-			// validate follower precommit state
-			if req.FollowerState.PrecommittedTxID > preCommittedTxID {
-				return nil, committedTxID, committedAlh,
-					fmt.Errorf("%w: follower precommit state diverged from master's", ErrFollowerDivergedFromMaster)
+		if req.ReplicaState.PrecommittedTxID > 0 {
+			// validate replica precommit state
+			if req.ReplicaState.PrecommittedTxID > preCommittedTxID {
+				return nil, committedTxID, committedAlh, fmt.Errorf("%w: replica precommit state diverged from primary's", ErrReplicaDivergedFromPrimary)
 			}
 
-			expectedFollowerPrecommitHdr, err := d.st.ReadTxHeader(req.FollowerState.PrecommittedTxID, true)
+			// integrityCheck is currently required to validate Alh
+			expectedReplicaPrecommitHdr, err := d.st.ReadTxHeader(req.ReplicaState.PrecommittedTxID, true, false)
 			if err != nil {
 				return nil, committedTxID, committedAlh, err
 			}
 
-			followerPreCommittedAlh := schema.DigestFromProto(req.FollowerState.PrecommittedAlh)
+			replicaPreCommittedAlh := schema.DigestFromProto(req.ReplicaState.PrecommittedAlh)
 
-			if expectedFollowerPrecommitHdr.Alh() != followerPreCommittedAlh {
-				return nil, expectedFollowerPrecommitHdr.ID, expectedFollowerPrecommitHdr.Alh(),
-					fmt.Errorf("%w: follower precommit state diverged from master's", ErrFollowerDivergedFromMaster)
+			if expectedReplicaPrecommitHdr.Alh() != replicaPreCommittedAlh {
+				return nil, expectedReplicaPrecommitHdr.ID, expectedReplicaPrecommitHdr.Alh(), fmt.Errorf("%w: replica precommit state diverged from primary's", ErrReplicaDivergedFromPrimary)
 			}
 
-			// master will provide commit state to the follower so it can commit pre-committed transactions
-			if req.FollowerState.PrecommittedTxID < committedTxID {
-				// if follower is behind current commit state in master
-				// return the alh up to the point known by the follower.
-				// That way the follower is able to validate is following the right master.
-				mayCommitUpToTxID = req.FollowerState.PrecommittedTxID
-				mayCommitUpToAlh = followerPreCommittedAlh
+			// primary will provide commit state to the replica so it can commit pre-committed transactions
+			if req.ReplicaState.PrecommittedTxID < committedTxID {
+				// if replica is behind current commit state in primary
+				// return the alh up to the point known by the replica.
+				// That way the replica is able to validate is following the right primary.
+				mayCommitUpToTxID = req.ReplicaState.PrecommittedTxID
+				mayCommitUpToAlh = replicaPreCommittedAlh
 			} else {
 				mayCommitUpToTxID = committedTxID
 				mayCommitUpToAlh = committedAlh
 			}
 		}
 
-		err = d.mayUpdateFollowerState(committedTxID, req.FollowerState)
+		err = d.mayUpdateReplicaState(committedTxID, req.ReplicaState)
 		if err != nil {
 			return nil, mayCommitUpToTxID, mayCommitUpToAlh, err
 		}
 	}
 
-	// it might be the case master will commit some txs (even there could be inmem-precommitted txs)
+	// it might be the case primary will commit some txs (even there could be inmem-precommitted txs)
 	// current timeout it's not a special value but at least a relative one
-	// note: master might also be waiting ack from any follower (even this follower may do progress)
+	// note: primary might also be waiting ack from any replica (even this primary may do progress)
 
-	// TODO: under some circustances, follower might not be able to do further progress until master
+	// TODO: under some circumstances, replica might not be able to do further progress until primary
 	// has made changes, such wait doesn't need to have a timeout, reducing networking and CPU utilization
-	ctx, cancel := context.WithTimeout(context.Background(), d.options.storeOpts.SyncFrequency*4)
-	defer cancel()
+	var cancel context.CancelFunc
 
-	err = d.WaitForTx(req.Tx, req.AllowPreCommitted, ctx.Done())
-	if errors.Is(err, watchers.ErrCancellationRequested) {
+	if req.ReplicaState != nil {
+		ctx, cancel = context.WithTimeout(ctx, d.options.storeOpts.SyncFrequency*4)
+		defer cancel()
+	}
+
+	err = d.WaitForTx(ctx, req.Tx, req.AllowPreCommitted)
+	if ctx.Err() != nil {
 		return nil, mayCommitUpToTxID, mayCommitUpToAlh, nil
 	}
 	if err != nil {
 		return nil, mayCommitUpToTxID, mayCommitUpToAlh, err
 	}
 
-	txbs, err = d.st.ExportTx(req.Tx, req.AllowPreCommitted, tx)
+	txbs, err = d.st.ExportTx(req.Tx, req.AllowPreCommitted, req.SkipIntegrityCheck, tx)
 	if err != nil {
 		return nil, mayCommitUpToTxID, mayCommitUpToAlh, err
 	}
@@ -1341,7 +1401,7 @@ func (d *db) ExportTxByID(req *schema.ExportTxRequest) (txbs []byte, mayCommitUp
 	return txbs, mayCommitUpToTxID, mayCommitUpToAlh, nil
 }
 
-func (d *db) ReplicateTx(exportedTx []byte) (*schema.TxHeader, error) {
+func (d *db) ReplicateTx(ctx context.Context, exportedTx []byte, skipIntegrityCheck bool, waitForIndexing bool) (*schema.TxHeader, error) {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
 
@@ -1349,7 +1409,7 @@ func (d *db) ReplicateTx(exportedTx []byte) (*schema.TxHeader, error) {
 		return nil, ErrNotReplica
 	}
 
-	hdr, err := d.st.ReplicateTx(exportedTx, false)
+	hdr, err := d.st.ReplicateTx(ctx, exportedTx, skipIntegrityCheck, waitForIndexing)
 	if err != nil {
 		return nil, err
 	}
@@ -1357,7 +1417,7 @@ func (d *db) ReplicateTx(exportedTx []byte) (*schema.TxHeader, error) {
 	return schema.TxHeaderToProto(hdr), nil
 }
 
-// AllowCommitUpto is used by followers to commit transactions once committed in master
+// AllowCommitUpto is used by replicas to commit transactions once committed in primary
 func (d *db) AllowCommitUpto(txID uint64, alh [sha256.Size]byte) error {
 	d.mutex.RLock()
 	defer d.mutex.RUnlock()
@@ -1366,24 +1426,24 @@ func (d *db) AllowCommitUpto(txID uint64, alh [sha256.Size]byte) error {
 		return ErrNotReplica
 	}
 
-	// follower pre-committed state must be consistent with master
+	// replica pre-committed state must be consistent with primary
 
 	committedTxID, committedAlh := d.st.CommittedAlh()
 	// handling a particular case in an optimized manner
 	if committedTxID == txID {
 		if committedAlh != alh {
-			return fmt.Errorf("%w: follower commit state diverged from master's", ErrIllegalState)
+			return fmt.Errorf("%w: replica commit state diverged from primary's", ErrIllegalState)
 		}
 		return nil
 	}
 
-	hdr, err := d.st.ReadTxHeader(txID, true)
+	hdr, err := d.st.ReadTxHeader(txID, true, false)
 	if err != nil {
 		return err
 	}
 
 	if hdr.Alh() != alh {
-		return fmt.Errorf("%w: follower commit state diverged from master's", ErrIllegalState)
+		return fmt.Errorf("%w: replica commit state diverged from primary's", ErrIllegalState)
 	}
 
 	return d.st.AllowCommitUpto(txID)
@@ -1399,7 +1459,7 @@ func (d *db) DiscardPrecommittedTxsSince(txID uint64) error {
 }
 
 // VerifiableTxByID ...
-func (d *db) VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.VerifiableTx, error) {
+func (d *db) VerifiableTxByID(ctx context.Context, req *schema.VerifiableTxRequest) (*schema.VerifiableTx, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -1413,7 +1473,7 @@ func (d *db) VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.Verifiab
 	var err error
 
 	if !req.KeepReferencesUnresolved {
-		snap, err = d.snapshotSince(req.SinceTx, req.NoWait)
+		snap, err = d.snapshotSince(ctx, []byte{SetKeyPrefix}, req.SinceTx)
 		if err != nil {
 			return nil, err
 		}
@@ -1426,7 +1486,7 @@ func (d *db) VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.Verifiab
 	}
 	defer d.releaseTx(reqTx)
 
-	err = d.st.ReadTx(req.Tx, reqTx)
+	err = d.st.ReadTx(req.Tx, false, reqTx)
 	if err != nil {
 		return nil, err
 	}
@@ -1437,7 +1497,7 @@ func (d *db) VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.Verifiab
 	if req.ProveSinceTx == 0 {
 		rootTxHdr = reqTx.Header()
 	} else {
-		rootTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false)
+		rootTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1456,7 +1516,7 @@ func (d *db) VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.Verifiab
 		return nil, err
 	}
 
-	sReqTx, err := d.serializeTx(reqTx, req.EntriesSpec, snap)
+	sReqTx, err := d.serializeTx(ctx, reqTx, req.EntriesSpec, snap, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1468,7 +1528,7 @@ func (d *db) VerifiableTxByID(req *schema.VerifiableTxRequest) (*schema.Verifiab
 }
 
 // TxScan ...
-func (d *db) TxScan(req *schema.TxScanRequest) (*schema.TxList, error) {
+func (d *db) TxScan(ctx context.Context, req *schema.TxScanRequest) (*schema.TxList, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -1485,12 +1545,11 @@ func (d *db) TxScan(req *schema.TxScanRequest) (*schema.TxList, error) {
 	defer d.releaseTx(tx)
 
 	limit := int(req.Limit)
-
 	if req.Limit == 0 {
 		limit = d.maxResultSize
 	}
 
-	snap, err := d.snapshotSince(req.SinceTx, req.NoWait)
+	snap, err := d.snapshotSince(ctx, []byte{SetKeyPrefix}, req.SinceTx)
 	if err != nil {
 		return nil, err
 	}
@@ -1505,33 +1564,26 @@ func (d *db) TxScan(req *schema.TxScanRequest) (*schema.TxList, error) {
 
 	for l := 1; l <= limit; l++ {
 		tx, err := txReader.Read()
-		if err == store.ErrNoMoreEntries {
+		if errors.Is(err, store.ErrNoMoreEntries) {
 			break
 		}
 		if err != nil {
 			return nil, err
 		}
 
-		sTx, err := d.serializeTx(tx, req.EntriesSpec, snap)
+		sTx, err := d.serializeTx(ctx, tx, req.EntriesSpec, snap, true)
 		if err != nil {
 			return nil, err
 		}
 
 		txList.Txs = append(txList.Txs, sTx)
-
-		if l == d.maxResultSize {
-			return txList,
-				fmt.Errorf("%w: found at least %d entries (maximum limit). "+
-					"Pagination over large results can be achieved by using the limit and initialTx arguments",
-					ErrResultSizeLimitReached, d.maxResultSize)
-		}
 	}
 
 	return txList, nil
 }
 
 // History ...
-func (d *db) History(req *schema.HistoryRequest) (*schema.Entries, error) {
+func (d *db) History(ctx context.Context, req *schema.HistoryRequest) (*schema.Entries, error) {
 	if req == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -1552,40 +1604,29 @@ func (d *db) History(req *schema.HistoryRequest) (*schema.Entries, error) {
 		waitUntilTx = currTxID
 	}
 
-	err := d.WaitForIndexingUpto(waitUntilTx, nil)
+	err := d.WaitForIndexingUpto(ctx, waitUntilTx)
 	if err != nil {
 		return nil, err
 	}
 
 	limit := int(req.Limit)
-
-	if req.Limit == 0 {
+	if limit == 0 {
 		limit = d.maxResultSize
 	}
 
 	key := EncodeKey(req.Key)
 
-	txs, hCount, err := d.st.History(key, req.Offset, req.Desc, limit)
+	valRefs, _, err := d.st.History(key, req.Offset, req.Desc, limit)
 	if err != nil && err != store.ErrOffsetOutOfRange {
 		return nil, err
 	}
 
 	list := &schema.Entries{
-		Entries: make([]*schema.Entry, len(txs)),
+		Entries: make([]*schema.Entry, len(valRefs)),
 	}
 
-	revision := req.Offset + 1
-	if req.Desc {
-		revision = hCount - req.Offset
-	}
-
-	for i, txID := range txs {
-		entry, _, err := d.st.ReadTxEntry(txID, key)
-		if err != nil {
-			return nil, err
-		}
-
-		val, err := d.st.ReadValue(entry)
+	for i, valRef := range valRefs {
+		val, err := valRef.Resolve()
 		if err != nil && err != store.ErrExpiredEntry {
 			return nil, err
 		}
@@ -1594,28 +1635,14 @@ func (d *db) History(req *schema.HistoryRequest) (*schema.Entries, error) {
 		}
 
 		list.Entries[i] = &schema.Entry{
-			Tx:       txID,
+			Tx:       valRef.Tx(),
 			Key:      req.Key,
-			Metadata: schema.KVMetadataToProto(entry.Metadata()),
+			Metadata: schema.KVMetadataToProto(valRef.KVMetadata()),
 			Value:    val,
-			Expired:  err == store.ErrExpiredEntry,
-			Revision: revision,
-		}
-
-		if req.Desc {
-			revision--
-		} else {
-			revision++
+			Expired:  errors.Is(err, store.ErrExpiredEntry),
+			Revision: valRef.HC(),
 		}
 	}
-
-	if limit == d.maxResultSize && hCount >= uint64(d.maxResultSize) {
-		return list,
-			fmt.Errorf("%w: found at least %d entries (the maximum limit). "+
-				"Pagination over large results can be achieved by using the limit and initialTx arguments",
-				ErrResultSizeLimitReached, d.maxResultSize)
-	}
-
 	return list, nil
 }
 
@@ -1631,22 +1658,15 @@ func (d *db) Close() (err error) {
 	d.closingMutex.Lock()
 	defer d.closingMutex.Unlock()
 
-	d.Logger.Infof("Closing database '%s'...", d.name)
+	d.Logger.Infof("closing database '%s'...", d.name)
 
 	defer func() {
 		if err == nil {
-			d.Logger.Infof("Database '%s' succesfully closed", d.name)
+			d.Logger.Infof("database '%s' successfully closed", d.name)
 		} else {
 			d.Logger.Infof("%v: while closing database '%s'", err, d.name)
 		}
 	}()
-
-	if d.sqlInitCancel != nil {
-		close(d.sqlInitCancel)
-		d.sqlInitCancel = nil
-	}
-
-	d.sqlInit.Wait() // Wait for SQL Engine initialization to conclude
 
 	return d.st.Close()
 }
@@ -1668,17 +1688,17 @@ func (d *db) AsReplica(asReplica, syncReplication bool, syncAcks int) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	d.followerStatesMutex.Lock()
-	defer d.followerStatesMutex.Unlock()
+	d.replicaStatesMutex.Lock()
+	defer d.replicaStatesMutex.Unlock()
 
 	d.options.replica = asReplica
 	d.options.syncAcks = syncAcks
 	d.options.syncReplication = syncReplication
 
 	if asReplica {
-		d.followerStates = nil
+		d.replicaStates = nil
 	} else if syncAcks > 0 {
-		d.followerStates = make(map[uuid]*followerState, syncAcks)
+		d.replicaStates = make(map[string]*replicaState, syncAcks)
 	}
 
 	d.st.SetExternalCommitAllowance(syncReplication)
@@ -1716,4 +1736,50 @@ func logErr(log logger.Logger, formattedMessage string, err error) error {
 		log.Errorf(formattedMessage, err)
 	}
 	return err
+}
+
+// CopyCatalog creates a copy of the sql catalog and returns a transaction
+// that can be used to commit the copy.
+func (d *db) CopyCatalogToTx(ctx context.Context, tx *store.OngoingTx) error {
+	// copy the sql catalog
+	err := d.sqlEngine.CopyCatalogToTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	// copy the document store catalog
+	err = d.documentEngine.CopyCatalogToTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *db) FindTruncationPoint(ctx context.Context, until time.Time) (*schema.TxHeader, error) {
+	hdr, err := d.st.LastTxUntil(until)
+	if errors.Is(err, store.ErrTxNotFound) {
+		return nil, ErrRetentionPeriodNotReached
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// look for the newst transaction with entries
+	for err == nil {
+		if hdr.NEntries > 0 {
+			break
+		}
+
+		if ctx.Err() != nil {
+			return nil, err
+		}
+
+		hdr, err = d.st.ReadTxHeader(hdr.ID-1, false, false)
+	}
+	return schema.TxHeaderToProto(hdr), nil
+}
+
+func (d *db) TruncateUptoTx(_ context.Context, txID uint64) error {
+	return d.st.TruncateUptoTx(txID)
 }

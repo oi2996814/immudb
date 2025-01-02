@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,15 +24,17 @@ import (
 )
 
 type inMemoryCache struct {
-	states map[string]map[string]*schema.ImmutableState
-	lock   *sync.RWMutex
+	serverUUID string
+	states     map[string]map[string]*schema.ImmutableState
+	identities map[string]string
+	lock       sync.RWMutex
 }
 
 // NewInMemoryCache returns a new in-memory cache
 func NewInMemoryCache() Cache {
 	return &inMemoryCache{
-		states: map[string]map[string]*schema.ImmutableState{},
-		lock:   new(sync.RWMutex),
+		states:     map[string]map[string]*schema.ImmutableState{},
+		identities: map[string]string{},
 	}
 }
 
@@ -60,10 +62,26 @@ func (imc *inMemoryCache) Set(serverUUID, db string, state *schema.ImmutableStat
 	return nil
 }
 
-func (fl *inMemoryCache) Lock(serverUUID string) (err error) {
-	return fmt.Errorf("not implemented")
+func (imc *inMemoryCache) Lock(serverUUID string) (err error) {
+	return ErrNotImplemented
 }
 
-func (fl *inMemoryCache) Unlock() (err error) {
-	return fmt.Errorf("not implemented")
+func (imc *inMemoryCache) Unlock() (err error) {
+	return ErrNotImplemented
+}
+
+func (imc *inMemoryCache) ServerIdentityCheck(serverIdentity, serverUUID string) error {
+	imc.lock.Lock()
+	defer imc.lock.Unlock()
+
+	if previousUUID, ok := imc.identities[serverIdentity]; ok {
+		// Server with this identity was seen before, ensure it did not change
+		if previousUUID != serverUUID {
+			return ErrServerIdentityValidationFailed
+		}
+		return nil
+	}
+
+	imc.identities[serverIdentity] = serverUUID
+	return nil
 }

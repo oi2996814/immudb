@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,9 +21,11 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/codenotary/immudb/test/performance-test-suite/pkg/benchmarks/writetxs"
 )
 
-func RunAllBenchmarks(d time.Duration, seed uint64) (*BenchmarkSuiteResult, error) {
+func RunAllBenchmarks(d time.Duration, tempDir string, seed uint64) (*BenchmarkSuiteResult, error) {
 	ret := &BenchmarkSuiteResult{
 		StartTime:   time.Now(),
 		ProcessInfo: gatherProcessInfo(),
@@ -41,7 +43,7 @@ func RunAllBenchmarks(d time.Duration, seed uint64) (*BenchmarkSuiteResult, erro
 			Timeline: []BenchmarkTimelineEntry{},
 		}
 
-		err := b.Warmup()
+		err := b.Warmup(tempDir)
 		if err != nil {
 			return nil, err
 		}
@@ -98,12 +100,14 @@ func RunAllBenchmarks(d time.Duration, seed uint64) (*BenchmarkSuiteResult, erro
 		result.EndTime = time.Now()
 		result.Duration = Duration(result.EndTime.Sub(result.StartTime))
 		result.RequestedDuration = Duration(d)
-		result.Results = res
+		result.Results = res.(*writetxs.Result)
 
 		ret.Benchmarks = append(ret.Benchmarks, result)
 
 		log.Printf("Benchmark %s finished", b.Name())
 		log.Printf("Results: %s", res)
+
+		b.Cleanup()
 	}
 
 	ret.EndTime = time.Now()

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package sql
 
 import (
+	"context"
 	"errors"
 )
 
@@ -48,7 +49,7 @@ func (r *dummyRowReader) TableAlias() string {
 	return "table1"
 }
 
-func (r *dummyRowReader) Read() (*Row, error) {
+func (r *dummyRowReader) Read(ctx context.Context) (*Row, error) {
 	return nil, errDummy
 }
 
@@ -71,7 +72,7 @@ func (r *dummyRowReader) ScanSpecs() *ScanSpecs {
 	return nil
 }
 
-func (r *dummyRowReader) Columns() ([]ColDescriptor, error) {
+func (r *dummyRowReader) Columns(ctx context.Context) ([]ColDescriptor, error) {
 	if r.failReturningColumns {
 		return nil, errDummy
 	}
@@ -88,12 +89,7 @@ func (r *dummyRowReader) Parameters() map[string]interface{} {
 	return r.params
 }
 
-func (r *dummyRowReader) SetParameters(params map[string]interface{}) error {
-	r.params = params
-	return nil
-}
-
-func (r *dummyRowReader) InferParameters(params map[string]SQLValueType) error {
+func (r *dummyRowReader) InferParameters(ctx context.Context, params map[string]SQLValueType) error {
 	if r.failInferringParams {
 		return errDummy
 	}
@@ -101,6 +97,6 @@ func (r *dummyRowReader) InferParameters(params map[string]SQLValueType) error {
 	return nil
 }
 
-func (r *dummyRowReader) colsBySelector() (map[string]ColDescriptor, error) {
+func (r *dummyRowReader) colsBySelector(ctx context.Context) (map[string]ColDescriptor, error) {
 	return nil, errDummy
 }

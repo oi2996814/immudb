@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,12 +25,14 @@ import (
 	"encoding/asn1"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"math/big"
 )
 
 var ErrInvalidPublicKey = errors.New("invalid public key")
+var ErrKeyCannotBeVerified = errors.New("key cannot be verified")
 
 type signer struct {
 	rand       io.Reader
@@ -88,13 +90,16 @@ func UnmarshalKey(publicKey []byte) (*ecdsa.PublicKey, error) {
 }
 
 // verify verifies a signed payload
-func Verify(payload []byte, signature []byte, publicKey *ecdsa.PublicKey) (bool, error) {
+func Verify(payload []byte, signature []byte, publicKey *ecdsa.PublicKey) error {
 	hash := sha256.Sum256(payload)
 	es := ecdsaSignature{}
 	if _, err := asn1.Unmarshal(signature, &es); err != nil {
-		return false, err
+		return fmt.Errorf("%w: %v", ErrKeyCannotBeVerified, err)
 	}
-	return ecdsa.Verify(publicKey, hash[:], es.R, es.S), nil
+	if !ecdsa.Verify(publicKey, hash[:], es.R, es.S) {
+		return ErrKeyCannotBeVerified
+	}
+	return nil
 }
 
 func ParsePublicKeyFile(filePath string) (*ecdsa.PublicKey, error) {

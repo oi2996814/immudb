@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,7 +33,7 @@ func NewMsgReceiver(stream ImmuServiceReceiver_Stream) *msgReceiver {
 
 type MsgReceiver interface {
 	Read(data []byte) (n int, err error)
-	ReadFully() ([]byte, error)
+	ReadFully() (message []byte, metadata map[string][]byte, err error)
 }
 
 type msgReceiver struct {
@@ -46,41 +46,41 @@ type msgReceiver struct {
 }
 
 // ReadFully reads the entire message that could be transmitted in several chunks
-func (r *msgReceiver) ReadFully() ([]byte, error) {
+func (r *msgReceiver) ReadFully() (message []byte, metadata map[string][]byte, err error) {
 	firstChunk, err := r.stream.Recv()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(firstChunk.Content) < 8 {
-		return nil, errors.New(ErrChunkTooSmall)
+		return nil, firstChunk.Metadata, errors.New(ErrChunkTooSmall)
 	}
 
-	messageLen := int(binary.BigEndian.Uint64(firstChunk.Content))
+	msgSize := int(binary.BigEndian.Uint64(firstChunk.Content))
 
-	b := make([]byte, messageLen)
-	i := 0
+	b := make([]byte, msgSize)
+	read := 0
 
 	copy(b, firstChunk.Content[8:])
-	i += len(firstChunk.Content) - 8
+	read += len(firstChunk.Content) - 8
 
-	for {
+	for read < msgSize {
 		chunk, err := r.stream.Recv()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return b, firstChunk.Metadata, err
 		}
 
-		copy(b[i:], chunk.Content)
-		i += len(chunk.Content)
+		copy(b[read:], chunk.Content)
+		read += len(chunk.Content)
 	}
 
-	if messageLen > i {
-		return nil, errors.New(ErrNotEnoughDataOnStream)
+	if read < msgSize {
+		return b, firstChunk.Metadata, io.EOF
 	}
 
-	return b, nil
+	return b, firstChunk.Metadata, nil
 }
 
 // Read read fill message with received data and return the number of read bytes or error. If no message is present it returns 0 and io.EOF. If the message is complete it returns 0 and nil, in that case successive calls to Read will returns a new message.
@@ -124,7 +124,7 @@ func (r *msgReceiver) Read(data []byte) (n int, err error) {
 
 		// no more data in stream but buffer is not enough large to contains the expected value
 		if r.eof && r.b.Len() < r.tl-r.s {
-			return 0, errors.New(ErrNotEnoughDataOnStream)
+			return 0, io.EOF
 		}
 
 		// message send edge cases

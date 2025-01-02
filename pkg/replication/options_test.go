@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,7 +25,7 @@ import (
 
 func TestOptions(t *testing.T) {
 	opts := &Options{}
-	require.False(t, opts.Valid())
+	require.ErrorIs(t, opts.Validate(), ErrInvalidOptions)
 
 	delayer := &expBackoff{
 		retryMinDelay: time.Second,
@@ -34,31 +34,35 @@ func TestOptions(t *testing.T) {
 		retryJitter:   0.1,
 	}
 
-	opts.WithMasterDatabase("defaultdb").
-		WithMasterAddress("127.0.0.1").
-		WithMasterPort(3322).
-		WithFollowerUsername("immudbUsr").
-		WithFollowerPassword("immdubPwd").
+	opts.WithPrimaryDatabase("defaultdb").
+		WithPrimaryHost("127.0.0.1").
+		WithPrimaryPort(3322).
+		WithPrimaryUsername("immudbUsr").
+		WithPrimaryPassword("immdubPwd").
 		WithStreamChunkSize(DefaultChunkSize).
 		WithPrefetchTxBufferSize(DefaultPrefetchTxBufferSize).
 		WithReplicationCommitConcurrency(DefaultReplicationCommitConcurrency).
 		WithAllowTxDiscarding(true).
+		WithSkipIntegrityCheck(true).
+		WithWaitForIndexing(true).
 		WithDelayer(delayer)
 
-	require.Equal(t, "defaultdb", opts.masterDatabase)
-	require.Equal(t, "127.0.0.1", opts.masterAddress)
-	require.Equal(t, 3322, opts.masterPort)
-	require.Equal(t, "immudbUsr", opts.followerUsername)
-	require.Equal(t, "immdubPwd", opts.followerPassword)
+	require.Equal(t, "defaultdb", opts.primaryDatabase)
+	require.Equal(t, "127.0.0.1", opts.primaryHost)
+	require.Equal(t, 3322, opts.primaryPort)
+	require.Equal(t, "immudbUsr", opts.primaryUsername)
+	require.Equal(t, "immdubPwd", opts.primaryPassword)
 	require.Equal(t, DefaultChunkSize, opts.streamChunkSize)
 	require.Equal(t, DefaultPrefetchTxBufferSize, opts.prefetchTxBufferSize)
 	require.Equal(t, DefaultReplicationCommitConcurrency, opts.replicationCommitConcurrency)
 	require.True(t, opts.allowTxDiscarding)
+	require.True(t, opts.skipIntegrityCheck)
+	require.True(t, opts.waitForIndexing)
 	require.Equal(t, delayer, opts.delayer)
 
-	require.True(t, opts.Valid())
+	require.NoError(t, opts.Validate())
 
 	defaultOpts := DefaultOptions()
 	require.NotNil(t, defaultOpts)
-	require.True(t, defaultOpts.Valid())
+	require.NoError(t, defaultOpts.Validate())
 }

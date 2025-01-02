@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -91,33 +91,36 @@ func TestMsgReceiver_ReadFully_Edge_Cases(t *testing.T) {
 		{C: nil, E: io.EOF},
 	})
 	mr := NewMsgReceiver(sm)
-	_, err := mr.ReadFully()
-	require.Equal(t, ErrNotEnoughDataOnStream, err.Error())
+	_, _, err := mr.ReadFully()
+	require.ErrorIs(t, err, io.EOF)
 
 	sm = streamtest.DefaultImmuServiceReceiverStreamMock([]*streamtest.ChunkError{
 		{C: &schema.Chunk{Content: []byte{1}}, E: nil},
 		{C: nil, E: io.EOF},
 	})
 	mr = NewMsgReceiver(sm)
-	_, err = mr.ReadFully()
-	require.Equal(t, ErrChunkTooSmall, err.Error())
+	_, _, err = mr.ReadFully()
+	require.ErrorContains(t, err, ErrChunkTooSmall)
 
 	expectedErr := errors.New("unexpected error")
 
 	sm = streamtest.DefaultImmuServiceReceiverStreamMock([]*streamtest.ChunkError{
 		{C: nil, E: expectedErr},
 	})
+
 	mr = NewMsgReceiver(sm)
-	_, err = mr.ReadFully()
-	require.Equal(t, expectedErr.Error(), err.Error())
+
+	_, _, err = mr.ReadFully()
+	require.ErrorIs(t, err, expectedErr)
 
 	sm = streamtest.DefaultImmuServiceReceiverStreamMock([]*streamtest.ChunkError{
 		{C: firstChunk, E: nil},
 		{C: nil, E: expectedErr},
 	})
+
 	mr = NewMsgReceiver(sm)
-	_, err = mr.ReadFully()
-	require.Equal(t, expectedErr.Error(), err.Error())
+	_, _, err = mr.ReadFully()
+	require.ErrorIs(t, err, expectedErr)
 }
 
 func TestMsgReceiver_EmptyStream(t *testing.T) {
@@ -133,7 +136,7 @@ func TestMsgReceiver_EmptyStream(t *testing.T) {
 	n, err := mr.Read(message)
 
 	require.Equal(t, 0, n)
-	require.Equal(t, io.EOF, err)
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestMsgReceiver_ErrNotEnoughDataOnStream(t *testing.T) {
@@ -153,13 +156,13 @@ func TestMsgReceiver_ErrNotEnoughDataOnStream(t *testing.T) {
 	n, err := mr.Read(message)
 
 	require.Equal(t, 0, n)
-	require.Equal(t, ErrNotEnoughDataOnStream, err.Error())
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestMsgReceiver_StreamRecvError(t *testing.T) {
 
 	sm := streamtest.DefaultImmuServiceReceiverStreamMock([]*streamtest.ChunkError{
-		{C: nil, E: errors.New("NewError!")},
+		{C: nil, E: errCustom},
 	})
 
 	mr := NewMsgReceiver(sm)
@@ -169,7 +172,7 @@ func TestMsgReceiver_StreamRecvError(t *testing.T) {
 	n, err := mr.Read(message)
 
 	require.Equal(t, 0, n)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 }
 
 func TestMsgReceiver_StreamMsgSent(t *testing.T) {
@@ -197,5 +200,5 @@ func TestMsgReceiver_StreamEOF(t *testing.T) {
 	n, err := mr.Read(message)
 
 	require.Equal(t, 0, n)
-	require.Equal(t, io.EOF, err)
+	require.ErrorIs(t, err, io.EOF)
 }

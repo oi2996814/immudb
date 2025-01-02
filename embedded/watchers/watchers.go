@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,13 +17,14 @@ limitations under the License.
 package watchers
 
 import (
+	"context"
 	"errors"
 	"sync"
 )
 
 var ErrMaxWaitessLimitExceeded = errors.New("watchers: max waiting limit exceeded")
 var ErrAlreadyClosed = errors.New("watchers: already closed")
-var ErrCancellationRequested = errors.New("watchers: cancellation requested")
+var ErrIllegalState = errors.New("watchers: illegal state")
 
 type WatchersHub struct {
 	wpoints map[uint64]*waitingPoint
@@ -63,6 +64,23 @@ func (w *WatchersHub) Status() (doneUpto uint64, waiting int, err error) {
 	return w.doneUpto, w.waiting, nil
 }
 
+func (w *WatchersHub) RecedeTo(t uint64) error {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+
+	if w.closed {
+		return ErrAlreadyClosed
+	}
+
+	if w.doneUpto < t {
+		return ErrIllegalState
+	}
+
+	w.doneUpto = t
+
+	return nil
+}
+
 func (w *WatchersHub) DoneUpto(t uint64) error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
@@ -94,7 +112,7 @@ func (w *WatchersHub) DoneUpto(t uint64) error {
 	return nil
 }
 
-func (w *WatchersHub) WaitFor(t uint64, cancellation <-chan struct{}) error {
+func (w *WatchersHub) WaitFor(ctx context.Context, t uint64) error {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
@@ -126,7 +144,7 @@ func (w *WatchersHub) WaitFor(t uint64, cancellation <-chan struct{}) error {
 	select {
 	case <-wp.ch:
 		break
-	case <-cancellation:
+	case <-ctx.Done():
 		cancelled = true
 	}
 
@@ -153,7 +171,7 @@ func (w *WatchersHub) WaitFor(t uint64, cancellation <-chan struct{}) error {
 			}
 		}
 
-		return ErrCancellationRequested
+		return ctx.Err()
 	}
 
 	return nil

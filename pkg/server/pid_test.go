@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,7 +71,7 @@ func TestPid(t *testing.T) {
 		return errMkdir
 	}
 	_, err = NewPid(pidPath, OS)
-	require.Equal(t, errMkdir, err)
+	require.ErrorIs(t, err, errMkdir)
 	OS.StatF = statFOK
 
 	errWriteFile := errors.New("WriteFile error")
@@ -79,7 +79,7 @@ func TestPid(t *testing.T) {
 		return errWriteFile
 	}
 	_, err = NewPid(pidPath, OS)
-	require.Equal(t, errWriteFile, err)
+	require.ErrorIs(t, err, errWriteFile)
 
 	OS.WriteFileF = func(filename string, data []byte, perm os.FileMode) error {
 		return nil
@@ -90,5 +90,5 @@ func TestPid(t *testing.T) {
 	OS.RemoveF = func(name string) error {
 		return errRemove
 	}
-	require.Equal(t, errRemove, pid.Remove())
+	require.ErrorIs(t, pid.Remove(), errRemove)
 }

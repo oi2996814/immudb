@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,14 +50,22 @@ func TestInMemoryCache(t *testing.T) {
 	require.Equal(t, []byte{21}, root.GetTxHash())
 
 	_, err = imc.Get("unknownServer", "db11")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "no roots found for server")
 	_, err = imc.Get("server1", "unknownDb")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "no state found for server")
 
 	err = imc.Lock("server1")
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotImplemented)
 
 	err = imc.Unlock()
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotImplemented)
 
+	err = imc.ServerIdentityCheck("server1", "identity1")
+	require.NoError(t, err)
+
+	err = imc.ServerIdentityCheck("server1", "identity2")
+	require.ErrorIs(t, err, ErrServerIdentityValidationFailed)
+
+	err = imc.ServerIdentityCheck("server1", "identity1")
+	require.NoError(t, err)
 }

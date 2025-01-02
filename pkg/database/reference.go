@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -29,7 +30,7 @@ var ErrFinalKeyCannotBeConvertedIntoReference = errors.New("final key cannot be 
 var ErrNoWaitOperationMustBeSelfContained = fmt.Errorf("no wait operation must be self-contained: %w", store.ErrIllegalArguments)
 
 // Reference ...
-func (d *db) SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error) {
+func (d *db) SetReference(ctx context.Context, req *schema.ReferenceRequest) (*schema.TxHeader, error) {
 	if req == nil || len(req.Key) == 0 || len(req.ReferencedKey) == 0 {
 		return nil, store.ErrIllegalArguments
 	}
@@ -46,13 +47,13 @@ func (d *db) SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error
 	}
 
 	lastTxID, _ := d.st.CommittedAlh()
-	err := d.st.WaitForIndexingUpto(lastTxID, nil)
+	err := d.st.WaitForIndexingUpto(ctx, lastTxID)
 	if err != nil {
 		return nil, err
 	}
 
 	// check key does not exists or it's already a reference
-	entry, err := d.getAtTx(EncodeKey(req.Key), req.AtTx, 0, d.st, 0)
+	entry, err := d.getAtTx(ctx, EncodeKey(req.Key), req.AtTx, 0, d.st, 0, true)
 	if err != nil && err != store.ErrKeyNotFound {
 		return nil, err
 	}
@@ -61,7 +62,7 @@ func (d *db) SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error
 	}
 
 	// check referenced key exists and it's not a reference
-	refEntry, err := d.getAtTx(EncodeKey(req.ReferencedKey), req.AtTx, 0, d.st, 0)
+	refEntry, err := d.getAtTx(ctx, EncodeKey(req.ReferencedKey), req.AtTx, 0, d.st, 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +70,7 @@ func (d *db) SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error
 		return nil, ErrReferencedKeyCannotBeAReference
 	}
 
-	tx, err := d.st.NewWriteOnlyTx()
+	tx, err := d.st.NewWriteOnlyTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -102,9 +103,9 @@ func (d *db) SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error
 	var hdr *store.TxHeader
 
 	if req.NoWait {
-		hdr, err = tx.AsyncCommit()
+		hdr, err = tx.AsyncCommit(ctx)
 	} else {
-		hdr, err = tx.Commit()
+		hdr, err = tx.Commit(ctx)
 	}
 	if err != nil {
 		return nil, err
@@ -114,7 +115,7 @@ func (d *db) SetReference(req *schema.ReferenceRequest) (*schema.TxHeader, error
 }
 
 // SafeReference ...
-func (d *db) VerifiableSetReference(req *schema.VerifiableReferenceRequest) (*schema.VerifiableTx, error) {
+func (d *db) VerifiableSetReference(ctx context.Context, req *schema.VerifiableReferenceRequest) (*schema.VerifiableTx, error) {
 	if req == nil {
 		return nil, store.ErrIllegalArguments
 	}
@@ -131,12 +132,12 @@ func (d *db) VerifiableSetReference(req *schema.VerifiableReferenceRequest) (*sc
 	}
 	defer d.releaseTx(lastTx)
 
-	txMetatadata, err := d.SetReference(req.ReferenceRequest)
+	txMetatadata, err := d.SetReference(ctx, req.ReferenceRequest)
 	if err != nil {
 		return nil, err
 	}
 
-	err = d.st.ReadTx(uint64(txMetatadata.Id), lastTx)
+	err = d.st.ReadTx(uint64(txMetatadata.Id), false, lastTx)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +147,7 @@ func (d *db) VerifiableSetReference(req *schema.VerifiableReferenceRequest) (*sc
 	if req.ProveSinceTx == 0 {
 		prevTxHdr = lastTx.Header()
 	} else {
-		prevTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false)
+		prevTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false, false)
 		if err != nil {
 			return nil, err
 		}

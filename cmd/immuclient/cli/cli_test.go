@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,9 +35,7 @@ import (
 
 func TestInit(t *testing.T) {
 	cli := Init(nil)
-	if len(cli.HelpMessage()) == 0 {
-		t.Fatal("cli help failed")
-	}
+	require.NotEmpty(t, cli.HelpMessage())
 }
 
 func setupTest(t *testing.T) *cli {
@@ -82,6 +80,7 @@ func TestRunCommandExtraArgs(t *testing.T) {
 	})
 	require.Contains(t, msg, "Redunant argument")
 }
+
 func TestRunMissingArgs(t *testing.T) {
 	cli := setupTest(t)
 
@@ -107,15 +106,12 @@ func TestCheckCommand(t *testing.T) {
 	msg := test.CaptureStdout(func() {
 		cli.checkCommand([]string{"--help"}, l)
 	})
-	if len(msg) == 0 {
-		t.Fatal("Help is empty")
-	}
+	require.NotEmpty(t, msg, "Help must not be empty")
+
 	msg = test.CaptureStdout(func() {
 		cli.checkCommand([]string{"set", "-h"}, l)
 	})
-	if len(msg) == 0 {
-		t.Fatal("Help is empty")
-	}
+	require.NotEmpty(t, msg, "Help must not be empty")
 
 	msg = test.CaptureStdout(func() {
 		cli.checkCommand([]string{"met", "-h"}, l)
@@ -139,6 +135,7 @@ func TestImmuClient_BackupAndRestoreUX(t *testing.T) {
 
 	options := server.DefaultOptions().WithDir(dir)
 	bs := servertest.NewBufconnServer(options)
+	uuid := bs.GetUUID()
 
 	err := bs.Start()
 	require.NoError(t, err)
@@ -177,6 +174,7 @@ func TestImmuClient_BackupAndRestoreUX(t *testing.T) {
 
 	bs = servertest.NewBufconnServer(options)
 	require.NoError(t, err)
+	bs.SetUUID(uuid)
 	err = bs.Start()
 	require.NoError(t, err)
 
@@ -212,6 +210,7 @@ func TestImmuClient_BackupAndRestoreUX(t *testing.T) {
 
 	bs = servertest.NewBufconnServer(options)
 	require.NoError(t, err)
+	bs.SetUUID(uuid)
 	err = bs.Start()
 	require.NoError(t, err)
 

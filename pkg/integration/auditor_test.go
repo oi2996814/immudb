@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,18 +33,19 @@ import (
 	"github.com/codenotary/immudb/pkg/client/homedir"
 	"github.com/codenotary/immudb/pkg/client/tokenservice"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/auth"
 	"github.com/codenotary/immudb/pkg/client"
 	"github.com/codenotary/immudb/pkg/client/auditor"
 	"github.com/codenotary/immudb/pkg/client/cache"
 	"github.com/codenotary/immudb/pkg/client/state"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/codenotary/immudb/pkg/server"
 	"github.com/codenotary/immudb/pkg/server/servertest"
 	"github.com/codenotary/immudb/pkg/signer"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -105,7 +106,7 @@ func TestDefaultAuditorRunOnEmptyDb(t *testing.T) {
 	defer bs.Stop()
 
 	ds := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
 	clientConn, err := grpc.Dial("add", ds...)
@@ -131,7 +132,7 @@ func TestDefaultAuditorRunOnEmptyDb(t *testing.T) {
 	)
 	require.NoError(t, err)
 	auditorDone := make(chan struct{}, 2)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
 }
 
@@ -163,7 +164,7 @@ func TestDefaultAuditorRunOnDb(t *testing.T) {
 	}
 
 	dialOptions := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 	tkf := cmdtest.RandString()
 	ts := tokenservice.
@@ -193,7 +194,7 @@ func TestDefaultAuditorRunOnDb(t *testing.T) {
 	require.NoError(t, err)
 
 	ds := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
 	var clientConn *grpc.ClientConn
@@ -201,9 +202,7 @@ func TestDefaultAuditorRunOnDb(t *testing.T) {
 	require.NoError(t, err)
 	serviceClient := schema.NewImmuServiceClient(clientConn)
 
-	auditorDir, err := ioutil.TempDir("", "auditor_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(auditorDir)
+	auditorDir := t.TempDir()
 
 	da, err := auditor.DefaultAuditor(
 		time.Duration(0),
@@ -223,9 +222,9 @@ func TestDefaultAuditorRunOnDb(t *testing.T) {
 	require.NoError(t, err)
 
 	auditorDone := make(chan struct{}, 2)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
 }
 
@@ -245,7 +244,7 @@ func TestRepeatedAuditorRunOnDb(t *testing.T) {
 	}
 
 	dialOptions := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 	tkf := cmdtest.RandString()
 	ts := tokenservice.
@@ -273,7 +272,7 @@ func TestRepeatedAuditorRunOnDb(t *testing.T) {
 	require.NoError(t, err)
 
 	ds := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
 	var clientConn *grpc.ClientConn
@@ -294,9 +293,7 @@ func TestRepeatedAuditorRunOnDb(t *testing.T) {
 		},
 	}
 
-	auditorDir, err := ioutil.TempDir("", "auditor_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(auditorDir)
+	auditorDir := t.TempDir()
 
 	da, err := auditor.DefaultAuditor(
 		time.Duration(0),
@@ -354,7 +351,7 @@ func testDefaultAuditorRunOnDbWithSignature(t *testing.T, pk *ecdsa.PublicKey) {
 	}
 
 	dialOptions := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 	tkf := cmdtest.RandString()
 	ts := tokenservice.
@@ -382,7 +379,7 @@ func testDefaultAuditorRunOnDbWithSignature(t *testing.T, pk *ecdsa.PublicKey) {
 	require.NoError(t, err)
 
 	ds := []grpc.DialOption{
-		grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure(),
+		grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 
 	var clientConn *grpc.ClientConn
@@ -390,9 +387,7 @@ func testDefaultAuditorRunOnDbWithSignature(t *testing.T, pk *ecdsa.PublicKey) {
 	require.NoError(t, err)
 	serviceClient := schema.NewImmuServiceClient(clientConn)
 
-	auditorDir, err := ioutil.TempDir("", "auditor_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(auditorDir)
+	auditorDir := t.TempDir()
 
 	da, err := auditor.DefaultAuditor(
 		time.Duration(0),
@@ -412,8 +407,8 @@ func testDefaultAuditorRunOnDbWithSignature(t *testing.T, pk *ecdsa.PublicKey) {
 	require.NoError(t, err)
 
 	auditorDone := make(chan struct{}, 2)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
-	err = da.Run(time.Duration(10), true, context.TODO().Done(), auditorDone)
+	err = da.Run(time.Duration(10), true, context.Background().Done(), auditorDone)
 	require.NoError(t, err)
 }

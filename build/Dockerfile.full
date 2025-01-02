@@ -1,0 +1,55 @@
+FROM golang:1.18 as build
+ARG BUILD_ARCH=amd64
+WORKDIR /src
+COPY go.mod go.sum /src/
+RUN go mod download -x
+COPY . .
+RUN make clean
+RUN make prerequisites
+RUN make swagger
+RUN make swagger/dist
+RUN GOOS=linux GOARCH=${BUILD_ARCH} WEBCONSOLE=default SWAGGER=true make immudb-static
+RUN GOOS=linux GOARCH=${BUILD_ARCH} make immuadmin-static immuclient-static
+RUN mkdir /empty
+
+FROM debian:11.7-slim as bullseye-slim
+LABEL org.opencontainers.image.authors="Codenotary Inc. <info@codenotary.com>"
+
+COPY --from=build /src/immudb /usr/sbin/immudb
+COPY --from=build /src/immuadmin /src/immuclient /usr/local/bin/
+COPY --from=build "/etc/ssl/certs/ca-certificates.crt" "/etc/ssl/certs/ca-certificates.crt"
+
+ARG IMMU_UID="3322"
+ARG IMMU_GID="3322"
+
+ENV IMMUDB_HOME="/usr/share/immudb" \
+    IMMUDB_DIR="/var/lib/immudb" \
+    IMMUDB_ADDRESS="0.0.0.0" \
+    IMMUDB_PORT="3322" \
+    IMMUDB_PIDFILE="" \
+    IMMUDB_LOGFILE="" \
+    IMMUDB_MTLS="false" \
+    IMMUDB_AUTH="true" \
+    IMMUDB_DETACHED="false" \
+    IMMUDB_DEVMODE="true" \
+    IMMUDB_MAINTENANCE="false" \
+    IMMUDB_ADMIN_PASSWORD="immudb" \
+    IMMUDB_PGSQL_SERVER="true" \
+    IMMUADMIN_TOKENFILE="/var/lib/immudb/admin_token"
+
+RUN addgroup --system --gid $IMMU_GID immu && \
+    adduser --system --uid $IMMU_UID --ingroup immu immu && \
+    mkdir -p "$IMMUDB_HOME" && \
+    mkdir -p "$IMMUDB_DIR" && \
+    chown -R immu:immu "$IMMUDB_HOME" "$IMMUDB_DIR" && \
+    chmod -R 777 "$IMMUDB_HOME" "$IMMUDB_DIR" && \
+    chmod +x /usr/sbin/immudb /usr/local/bin/immuadmin /usr/local/bin/immuclient
+
+EXPOSE 3322
+EXPOSE 9497
+EXPOSE 8080
+EXPOSE 5432
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD [ "/usr/local/bin/immuadmin", "status" ]
+USER immu
+ENTRYPOINT ["/usr/sbin/immudb"]

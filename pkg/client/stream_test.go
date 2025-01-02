@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,11 +27,10 @@ import (
 
 func TestImmuClient_Errors(t *testing.T) {
 	client := NewClient()
-	ctx := context.TODO()
+	ctx := context.Background()
 
 	_, err := client.StreamVerifiedSet(ctx, nil)
-	require.Error(t, err)
-	require.Equal(t, "no key-values specified", err.Error())
+	require.ErrorContains(t, err, "no key-values specified")
 
 	// test ErrNotConnected errors
 	fs := []func() (string, error){
@@ -60,6 +59,6 @@ func TestImmuClient_Errors(t *testing.T) {
 	}
 	for _, f := range fs {
 		fn, err := f()
-		require.Equal(t, ErrNotConnected.Error(), err.Error(), fn)
+		require.ErrorIs(t, err, ErrNotConnected, fn)
 	}
 }
