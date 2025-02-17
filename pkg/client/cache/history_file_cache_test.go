@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,28 +24,31 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 
 	"github.com/codenotary/immudb/pkg/api/schema"
 )
 
 func TestNewHistoryFileCache(t *testing.T) {
-	dir, err := ioutil.TempDir("", "example")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	fc := NewHistoryFileCache(dir)
-	defer os.RemoveAll(dir)
 	require.IsType(t, &historyFileCache{}, fc)
+
+	require.Error(t, fc.Lock("foo"))
+	require.Error(t, fc.Unlock())
+
+	err := fc.ServerIdentityCheck("identity1", "uuid2")
+	require.NoError(t, err)
 }
 
 func TestNewHistoryFileCacheSet(t *testing.T) {
-	dir, err := ioutil.TempDir("", "example")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	fc := NewHistoryFileCache(dir)
-	defer os.RemoveAll(dir)
 
-	err = fc.Set("uuid", "dbName", &schema.ImmutableState{TxId: 1, TxHash: []byte{1}})
+	err := fc.Set("uuid", "dbName", &schema.ImmutableState{TxId: 1, TxHash: []byte{1}})
 	require.NoError(t, err)
 
 	err = fc.Set("uuid", "dbName", &schema.ImmutableState{TxId: 2, TxHash: []byte{2}})
@@ -60,11 +63,9 @@ func TestNewHistoryFileCacheSet(t *testing.T) {
 }
 
 func TestNewHistoryFileCacheGet(t *testing.T) {
-	dir, err := ioutil.TempDir("", "example")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	fc := NewHistoryFileCache(dir)
-	defer os.RemoveAll(dir)
 
 	root, err := fc.Get("uuid", "dbName")
 	require.NoError(t, err)
@@ -72,11 +73,9 @@ func TestNewHistoryFileCacheGet(t *testing.T) {
 }
 
 func TestNewHistoryFileCacheWalk(t *testing.T) {
-	dir, err := ioutil.TempDir("", "example")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	fc := NewHistoryFileCache(dir)
-	defer os.RemoveAll(dir)
 
 	iface, err := fc.Walk("uuid", "dbName", func(root *schema.ImmutableState) interface{} {
 		return nil
@@ -99,30 +98,25 @@ func TestNewHistoryFileCacheWalk(t *testing.T) {
 }
 
 func TestHistoryFileCache_SetError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "example")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	fc := NewHistoryFileCache(dir)
-	defer os.RemoveAll(dir)
 
-	err = fc.Set("uuid", "dbName", nil)
-	require.Error(t, err)
+	err := fc.Set("uuid", "dbName", nil)
+	require.ErrorIs(t, err, proto.ErrNil)
 }
 
 func TestHistoryFileCache_GetError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "example")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	fc := NewHistoryFileCache(dir)
-	defer os.RemoveAll(dir)
 
 	// create a dummy file so that the cache can't create the directory
 	// automatically
-	err = ioutil.WriteFile(filepath.Join(dir, "exists"), []byte("data"), 0644)
+	err := ioutil.WriteFile(filepath.Join(dir, "exists"), []byte("data"), 0644)
 	require.NoError(t, err)
 	_, err = fc.Get("exists", "dbName")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "exists")
+	require.ErrorContains(t, err, "exists")
 }
 
 func TestHistoryFileCache_SetMissingFolder(t *testing.T) {
@@ -131,40 +125,34 @@ func TestHistoryFileCache_SetMissingFolder(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	err := fc.Set("uuid", "dbName", nil)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "error ensuring states dir")
 }
 
 func TestHistoryFileCache_WalkFolderNotExistsCreated(t *testing.T) {
-	dir, err := ioutil.TempDir("", "history-cache")
-	require.NoError(t, err)
-
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	notExists := filepath.Join(dir, "not-exists")
 	fc := NewHistoryFileCache(notExists)
 
-	_, err = fc.Walk("uuid", "dbName", func(root *schema.ImmutableState) interface{} {
+	_, err := fc.Walk("uuid", "dbName", func(root *schema.ImmutableState) interface{} {
 		return nil
 	})
 	require.NoError(t, err)
 }
 
 func TestHistoryFileCache_getStatesFileInfosError(t *testing.T) {
-	dir, err := ioutil.TempDir("", "history-cache")
-	require.NoError(t, err)
-
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	notExists := filepath.Join(dir, "does-not-exist")
 	fc := &historyFileCache{dir: notExists}
-	_, err = fc.getStatesFileInfos(dir)
+	_, err := fc.getStatesFileInfos(dir)
 	require.NoError(t, err)
 }
 
 func TestHistoryFileCache_unmarshalRootErr(t *testing.T) {
 	fc := &historyFileCache{}
 	_, err := fc.unmarshalRoot("path", "db")
-	require.Error(t, err)
+	require.ErrorContains(t, err, "error reading state from")
 }
 
 func TestHistoryFileCache_unmarshalRootSingleLineErr(t *testing.T) {
@@ -177,7 +165,7 @@ func TestHistoryFileCache_unmarshalRootSingleLineErr(t *testing.T) {
 	}
 	fc := &historyFileCache{}
 	_, err = fc.unmarshalRoot(tmpFile.Name(), dbName)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrPrevStateNotFound)
 }
 
 func TestHistoryFileCache_unmarshalRootUnableToDecodeErr(t *testing.T) {
@@ -190,7 +178,7 @@ func TestHistoryFileCache_unmarshalRootUnableToDecodeErr(t *testing.T) {
 	}
 	fc := &historyFileCache{}
 	_, err = fc.unmarshalRoot(tmpFile.Name(), dbName)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrPrevStateNotFound)
 }
 
 func TestHistoryFileCache_unmarshalRootUnmarshalErr(t *testing.T) {
@@ -203,7 +191,7 @@ func TestHistoryFileCache_unmarshalRootUnmarshalErr(t *testing.T) {
 	}
 	fc := &historyFileCache{}
 	_, err = fc.unmarshalRoot(tmpFile.Name(), dbName)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "error unmarshaling state from")
 }
 
 func TestHistoryFileCache_unmarshalRootEmptyFile(t *testing.T) {

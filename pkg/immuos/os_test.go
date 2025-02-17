@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -44,7 +44,7 @@ func TestStandardOS(t *testing.T) {
 		return nil, errCreate
 	}
 	_, err = os.Create(filename)
-	require.Equal(t, errCreate, err)
+	require.ErrorIs(t, err, errCreate)
 	os.CreateF = createFOK
 
 	// Getwd
@@ -57,7 +57,7 @@ func TestStandardOS(t *testing.T) {
 		return "", errGetwd
 	}
 	_, err = os.Getwd()
-	require.Equal(t, errGetwd, err)
+	require.ErrorIs(t, err, errGetwd)
 	os.GetwdF = getwdFOK
 
 	// Mkdir
@@ -68,7 +68,8 @@ func TestStandardOS(t *testing.T) {
 	os.MkdirF = func(name string, perm stdos.FileMode) error {
 		return errMkdir
 	}
-	require.Equal(t, errMkdir, os.Mkdir(dirname, 0755))
+	err = os.Mkdir(dirname, 0755)
+	require.ErrorIs(t, err, errMkdir)
 	os.MkdirF = mkdirFOK
 
 	// MkdirAll
@@ -79,7 +80,8 @@ func TestStandardOS(t *testing.T) {
 	os.MkdirAllF = func(path string, perm stdos.FileMode) error {
 		return errMkdirAll
 	}
-	require.Equal(t, errMkdirAll, os.MkdirAll(dirname2, 0755))
+	err = os.MkdirAll(dirname2, 0755)
+	require.ErrorIs(t, err, errMkdirAll)
 	os.MkdirAllF = mkdirAllFOK
 
 	// Rename
@@ -90,7 +92,8 @@ func TestStandardOS(t *testing.T) {
 	os.RenameF = func(oldpath, newpath string) error {
 		return errRename
 	}
-	require.Equal(t, errRename, os.Rename(filename, filename2))
+	err = os.Rename(filename, filename2)
+	require.ErrorIs(t, err, errRename)
 	os.RenameF = renameFOK
 
 	// Stat
@@ -103,7 +106,7 @@ func TestStandardOS(t *testing.T) {
 		return nil, errStat
 	}
 	_, err = os.Stat(filename2)
-	require.Equal(t, errStat, err)
+	require.ErrorIs(t, err, errStat)
 	os.StatF = statFOK
 
 	// Remove
@@ -113,7 +116,8 @@ func TestStandardOS(t *testing.T) {
 	os.RemoveF = func(name string) error {
 		return errRemove
 	}
-	require.Equal(t, errRemove, os.Remove(filename2))
+	err = os.Remove(filename2)
+	require.ErrorIs(t, err, errRemove)
 	os.RemoveF = removeFOK
 
 	// RemoveAll
@@ -123,7 +127,8 @@ func TestStandardOS(t *testing.T) {
 	os.RemoveAllF = func(path string) error {
 		return errRemoveAll
 	}
-	require.Equal(t, errRemoveAll, os.RemoveAll(filename2))
+	err = os.RemoveAll(filename2)
+	require.ErrorIs(t, err, errRemoveAll)
 	os.RemoveAllF = removeAllFOK
 
 	// Chown
@@ -132,7 +137,8 @@ func TestStandardOS(t *testing.T) {
 	os.ChownF = func(name string, uid, gid int) error {
 		return errChown
 	}
-	require.Equal(t, errChown, os.Chown("name", 1, 2))
+	err = os.Chown("name", 1, 2)
+	require.ErrorIs(t, err, errChown)
 	os.ChownF = chownFOK
 
 	// Chmod
@@ -141,7 +147,8 @@ func TestStandardOS(t *testing.T) {
 	os.ChmodF = func(name string, mode stdos.FileMode) error {
 		return errChmod
 	}
-	require.Equal(t, errChmod, os.Chmod("name", 0644))
+	err = os.Chmod("name", 0644)
+	require.ErrorIs(t, err, errChmod)
 	os.ChmodF = chmodFOK
 
 	// IsNotExist
@@ -159,7 +166,7 @@ func TestStandardOS(t *testing.T) {
 		return nil, errOpen
 	}
 	_, err = os.Open("name")
-	require.Equal(t, errOpen, err)
+	require.ErrorIs(t, err, errOpen)
 	os.OpenF = openFOK
 
 	// OpenFile
@@ -169,7 +176,7 @@ func TestStandardOS(t *testing.T) {
 		return nil, errOpenFile
 	}
 	_, err = os.OpenFile("name", 1, 0644)
-	require.Equal(t, errOpenFile, err)
+	require.ErrorIs(t, err, errOpenFile)
 	os.OpenFileF = openFileFOK
 
 	// Executable
@@ -179,7 +186,7 @@ func TestStandardOS(t *testing.T) {
 		return "", errExecutable
 	}
 	_, err = os.Executable()
-	require.Equal(t, errExecutable, err)
+	require.ErrorIs(t, err, errExecutable)
 	os.ExecutableF = executableFOK
 
 	// Getpid
@@ -206,7 +213,7 @@ func TestStandardOSFilepathEmbedded(t *testing.T) {
 		return "", errAbs
 	}
 	_, err = os.Abs(relPath)
-	require.Equal(t, errAbs, err)
+	require.ErrorIs(t, err, errAbs)
 	os.AbsF = absFOK
 }
 
@@ -220,7 +227,7 @@ func TestStandardOSUserEmbedded(t *testing.T) {
 		return nil, errLookup
 	}
 	_, err := os.Lookup("username")
-	require.Equal(t, errLookup, err)
+	require.ErrorIs(t, err, errLookup)
 	os.LookupF = lookupFOK
 }
 

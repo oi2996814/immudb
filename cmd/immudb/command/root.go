@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,10 @@ limitations under the License.
 package immudb
 
 import (
+	"path/filepath"
+
 	c "github.com/codenotary/immudb/cmd/helper"
-	"github.com/codenotary/immudb/pkg/logger"
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/server"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -68,10 +70,14 @@ func (cl *Commandline) Immudb(immudbServer server.ImmuServerIf) func(*cobra.Comm
 
 		// initialize logger for immudb
 		ilogger, err := logger.NewLogger(&logger.Options{
-			Name:      "immudb",
-			LogFormat: options.LogFormat,
-			LogFile:   options.Logfile,
-			Level:     logger.LogLevelFromEnvironment(),
+			Name:              "immudb",
+			LogFormat:         options.LogFormat,
+			LogDir:            filepath.Join(options.Dir, options.LogDir),
+			LogFile:           options.Logfile,
+			LogRotationSize:   options.LogRotationSize,
+			LogRotationAge:    options.LogRotationAge,
+			LogFileTimeFormat: logger.LogFileFormat,
+			Level:             logger.LogLevelFromEnvironment(),
 		})
 		if err != nil {
 			c.QuitToStdErr(err)

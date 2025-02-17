@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package server
 
 import (
 	"encoding/binary"
+	"io"
 	"math"
 	"net"
 	"testing"
@@ -40,7 +41,7 @@ func TestSession_MessageReader(t *testing.T) {
 
 	_, err := mr.ReadRawMessage()
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 
 	c1, c2 = net.Pipe()
 	mr = &messageReader{
@@ -54,7 +55,7 @@ func TestSession_MessageReader(t *testing.T) {
 
 	_, err = mr.ReadRawMessage()
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 
 	mr = &messageReader{}
 	err = mr.CloseConnection()
@@ -75,12 +76,12 @@ func TestSession_MessageReader(t *testing.T) {
 
 	_, err = mr.ReadRawMessage()
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, errors.ErrMalformedMessage)
 
 	mr = &messageReader{}
 	err = mr.CloseConnection()
 
-	require.Error(t, errors.ErrMalformedMessage)
+	require.NoError(t, err)
 }
 
 func TestSession_MessageReaderMaxMsgSize(t *testing.T) {
@@ -99,10 +100,10 @@ func TestSession_MessageReaderMaxMsgSize(t *testing.T) {
 
 	_, err := mr.ReadRawMessage()
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.EOF)
 
 	mr = &messageReader{}
 	err = mr.CloseConnection()
 
-	require.Error(t, errors.ErrMessageTooLarge)
+	require.NoError(t, err)
 }

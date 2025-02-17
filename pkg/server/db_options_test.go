@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,6 @@ limitations under the License.
 package server
 
 import (
-	"io/ioutil"
-	"os"
 	"testing"
 
 	"github.com/codenotary/immudb/pkg/replication"
@@ -26,14 +24,12 @@ import (
 )
 
 func TestDefaultOptions(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	s, closer := testServer(DefaultOptions().WithDir(dir))
 	defer closer()
 
-	opts := s.defaultDBOptions("db1")
+	opts := s.defaultDBOptions("db1", "user")
 
 	require.NoError(t, opts.Validate())
 
@@ -42,14 +38,12 @@ func TestDefaultOptions(t *testing.T) {
 }
 
 func TestReplicaOptions(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	s, closer := testServer(DefaultOptions().WithDir(dir))
 	defer closer()
 
-	opts := s.defaultDBOptions("db1")
+	opts := s.defaultDBOptions("db1", "user")
 
 	opts.Replica = true
 
@@ -69,15 +63,13 @@ func TestReplicaOptions(t *testing.T) {
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 }
 
-func TestMasterOptions(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+func TestPrimaryOptions(t *testing.T) {
+	dir := t.TempDir()
 
 	s, closer := testServer(DefaultOptions().WithDir(dir))
 	defer closer()
 
-	opts := s.defaultDBOptions("db1")
+	opts := s.defaultDBOptions("db1", "user")
 
 	opts.Replica = false
 
@@ -100,21 +92,27 @@ func TestMasterOptions(t *testing.T) {
 	opts.PrefetchTxBufferSize = 100
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 
-	opts.FollowerPassword = "follower-pwd"
+	opts.PrimaryPassword = "primary-pwd"
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 
-	opts.FollowerUsername = "follower-username"
+	opts.PrimaryUsername = "primary-username"
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 
-	opts.MasterPort = 3323
+	opts.PrimaryPort = 3323
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 
-	opts.MasterAddress = "localhost"
+	opts.PrimaryHost = "localhost"
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 
-	opts.MasterDatabase = "masterdb"
+	opts.PrimaryDatabase = "primarydb"
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 
 	opts.SyncAcks = -1
+	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
+
+	opts.TruncationFrequency = -1
+	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
+
+	opts.RetentionPeriod = -1
 	require.ErrorIs(t, opts.Validate(), ErrIllegalArguments)
 }

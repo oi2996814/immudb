@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,18 +17,21 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"os"
 	"testing"
 
+	"github.com/codenotary/immudb/embedded/logger"
+	"github.com/codenotary/immudb/embedded/sql"
+	"github.com/codenotary/immudb/embedded/store"
 	"github.com/codenotary/immudb/pkg/api/schema"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/stretchr/testify/require"
 )
 
 func TestReadOnlyReplica(t *testing.T) {
 	rootPath := t.TempDir()
 
-	options := DefaultOption().WithDBRootPath(rootPath).AsReplica(true)
+	options := DefaultOptions().WithDBRootPath(rootPath).AsReplica(true)
 
 	replica, err := NewDB("db", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
@@ -39,10 +42,10 @@ func TestReadOnlyReplica(t *testing.T) {
 	replica, err = OpenDB("db", nil, options, logger.NewSimpleLogger("immudb ", os.Stderr))
 	require.NoError(t, err)
 
-	_, err = replica.Set(&schema.SetRequest{KVs: []*schema.KeyValue{{Key: []byte("key1"), Value: []byte("value1")}}})
-	require.Equal(t, ErrIsReplica, err)
+	_, err = replica.Set(context.Background(), &schema.SetRequest{KVs: []*schema.KeyValue{{Key: []byte("key1"), Value: []byte("value1")}}})
+	require.ErrorIs(t, err, ErrIsReplica)
 
-	_, err = replica.ExecAll(&schema.ExecAllRequest{
+	_, err = replica.ExecAll(context.Background(), &schema.ExecAllRequest{
 		Operations: []*schema.Op{
 			{
 				Operation: &schema.Op_Kv{
@@ -54,67 +57,75 @@ func TestReadOnlyReplica(t *testing.T) {
 			},
 		}},
 	)
-	require.Equal(t, ErrIsReplica, err)
+	require.ErrorIs(t, err, ErrIsReplica)
 
-	_, err = replica.SetReference(&schema.ReferenceRequest{
+	_, err = replica.SetReference(context.Background(), &schema.ReferenceRequest{
 		Key:           []byte("key"),
 		ReferencedKey: []byte("refkey"),
 	})
-	require.Equal(t, ErrIsReplica, err)
+	require.ErrorIs(t, err, ErrIsReplica)
 
-	_, err = replica.ZAdd(&schema.ZAddRequest{
+	_, err = replica.ZAdd(context.Background(), &schema.ZAddRequest{
 		Set:   []byte("set"),
 		Score: 1,
 		Key:   []byte("key"),
 	})
-	require.Equal(t, ErrIsReplica, err)
+	require.ErrorIs(t, err, ErrIsReplica)
 
-	_, _, err = replica.SQLExec(&schema.SQLExecRequest{Sql: "CREATE TABLE mytable(id INTEGER, title VARCHAR, PRIMARY KEY id)"}, nil)
-	require.Equal(t, ErrIsReplica, err)
+	_, _, err = replica.SQLExec(context.Background(), nil, &schema.SQLExecRequest{Sql: "CREATE TABLE mytable(id INTEGER, title VARCHAR, PRIMARY KEY id)"})
+	require.ErrorIs(t, err, ErrIsReplica)
 
-	_, err = replica.SQLQuery(&schema.SQLQueryRequest{Sql: "SELECT * FROM mytable"}, nil)
-	require.Equal(t, ErrSQLNotReady, err)
+	_, err = replica.SQLQuery(context.Background(), nil, &schema.SQLQueryRequest{Sql: "SELECT * FROM mytable"})
+	require.ErrorIs(t, err, sql.ErrTableDoesNotExist)
 
-	_, err = replica.ListTables(nil)
-	require.Equal(t, ErrSQLNotReady, err)
+	_, err = replica.DescribeTable(context.Background(), nil, "mytable")
+	require.ErrorIs(t, err, sql.ErrTableDoesNotExist)
 
-	_, err = replica.DescribeTable("mytable", nil)
-	require.Equal(t, ErrSQLNotReady, err)
+	res, err := replica.ListTables(context.Background(), nil)
+	require.NoError(t, err)
+	require.Empty(t, res.Rows)
 
-	_, err = replica.VerifiableSQLGet(&schema.VerifiableSQLGetRequest{
+	_, err = replica.VerifiableSQLGet(context.Background(), &schema.VerifiableSQLGetRequest{
 		SqlGetRequest: &schema.SQLGetRequest{
 			Table:    "mytable",
 			PkValues: []*schema.SQLValue{{Value: &schema.SQLValue_N{N: 1}}},
 		},
 	})
-	require.Equal(t, ErrSQLNotReady, err)
+	require.ErrorIs(t, err, sql.ErrTableDoesNotExist)
 }
 
 func TestSwitchToReplica(t *testing.T) {
 	rootPath := t.TempDir()
 
-	options := DefaultOption().WithDBRootPath(rootPath).AsReplica(false)
+	options := DefaultOptions().WithDBRootPath(rootPath).AsReplica(false)
 
 	replica := makeDbWith(t, "db", options)
 
-	_, _, err := replica.SQLExec(&schema.SQLExecRequest{Sql: "CREATE TABLE mytable(id INTEGER, title VARCHAR, PRIMARY KEY id)"}, nil)
+	_, _, err := replica.SQLExec(context.Background(), nil, &schema.SQLExecRequest{Sql: "CREATE TABLE mytable(id INTEGER, title VARCHAR, PRIMARY KEY id)"})
 	require.NoError(t, err)
 
-	_, _, err = replica.SQLExec(&schema.SQLExecRequest{Sql: "INSERT INTO mytable(id, title) VALUES (1, 'TITLE1')"}, nil)
+	_, _, err = replica.SQLExec(context.Background(), nil, &schema.SQLExecRequest{Sql: "INSERT INTO mytable(id, title) VALUES (1, 'TITLE1')"})
 	require.NoError(t, err)
 
 	replica.AsReplica(true, false, 0)
 
-	_, err = replica.ListTables(nil)
+	state, err := replica.CurrentState()
 	require.NoError(t, err)
 
-	_, err = replica.DescribeTable("mytable", nil)
+	err = replica.DiscardPrecommittedTxsSince(state.TxId)
+	require.Error(t, err, store.ErrIllegalArguments)
+
+	_, err = replica.ListTables(context.Background(), nil)
 	require.NoError(t, err)
 
-	_, err = replica.SQLQuery(&schema.SQLQueryRequest{Sql: "SELECT * FROM mytable"}, nil)
+	_, err = replica.DescribeTable(context.Background(), nil, "mytable")
 	require.NoError(t, err)
 
-	_, err = replica.VerifiableSQLGet(&schema.VerifiableSQLGetRequest{
+	reader, err := replica.SQLQuery(context.Background(), nil, &schema.SQLQueryRequest{Sql: "SELECT * FROM mytable"})
+	require.NoError(t, err)
+	require.NoError(t, reader.Close())
+
+	_, err = replica.VerifiableSQLGet(context.Background(), &schema.VerifiableSQLGetRequest{
 		SqlGetRequest: &schema.SQLGetRequest{
 			Table:    "mytable",
 			PkValues: []*schema.SQLValue{{Value: &schema.SQLValue_N{N: 1}}},

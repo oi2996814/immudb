@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -103,6 +103,19 @@ func (v *SQLValue_Ts) Equal(sqlv SqlValue) (bool, error) {
 	return v.Ts == ts.Ts, nil
 }
 
+func (v *SQLValue_F) Equal(sqlv SqlValue) (bool, error) {
+	_, isNull := sqlv.(*SQLValue_Null)
+	if isNull {
+		return false, nil
+	}
+
+	f, isFloat := sqlv.(*SQLValue_F)
+	if !isFloat {
+		return false, sql.ErrNotComparableValues
+	}
+	return v.F == f.F, nil
+}
+
 func RenderValue(op isSQLValue_Value) string {
 	switch v := op.(type) {
 	case *SQLValue_Null:
@@ -129,6 +142,10 @@ func RenderValue(op isSQLValue_Value) string {
 		{
 			t := sql.TimeFromInt64(v.Ts)
 			return t.Format("2006-01-02 15:04:05.999999")
+		}
+	case *SQLValue_F:
+		{
+			return strconv.FormatFloat(float64(v.F), 'f', -1, 64)
 		}
 	}
 
@@ -162,8 +179,11 @@ func RenderValueAsByte(op isSQLValue_Value) []byte {
 			t := sql.TimeFromInt64(v.Ts)
 			return []byte(t.Format("2006-01-02 15:04:05.999999"))
 		}
+	case *SQLValue_F:
+		{
+			return []byte(strconv.FormatFloat(float64(v.F), 'f', -1, 64))
+		}
 	}
-
 	return []byte(fmt.Sprintf("%v", op))
 }
 
@@ -197,7 +217,10 @@ func RawValue(v *SQLValue) interface{} {
 		{
 			return sql.TimeFromInt64(tv.Ts)
 		}
+	case *SQLValue_F:
+		{
+			return tv.F
+		}
 	}
-
 	return nil
 }

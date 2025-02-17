@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,6 @@ package errors_test
 import (
 	stdErrors "errors"
 	"fmt"
-	"os"
 	"testing"
 
 	"github.com/codenotary/immudb/pkg/errors"
@@ -28,8 +27,7 @@ import (
 )
 
 func Test_Immuerror(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "cause error"
 	err := errors.New(cause)
@@ -38,15 +36,13 @@ func Test_Immuerror(t *testing.T) {
 	require.Equal(t, err.Error(), cause)
 	require.Equal(t, err.Message(), cause)
 	require.Equal(t, err.Code(), errors.CodInternalError)
-	require.Equal(t, err.Cause(), err)
+	require.ErrorIs(t, err, err.Cause())
 	require.Equal(t, err.RetryDelay(), int32(0))
 	require.NotNil(t, err.Stack())
-
 }
 
 func Test_WrappingError(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "std error"
 	err := errors.New(cause)
@@ -65,8 +61,7 @@ func Test_WrappingError(t *testing.T) {
 }
 
 func Test_WrappingImmuerror(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "cause error"
 	err := errors.New(cause)
@@ -83,8 +78,7 @@ func Test_WrappingImmuerror(t *testing.T) {
 }
 
 func Test_ImmuerrorIs(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "cause error"
 	err := errors.New(cause).WithCode(errors.CodInternalError)
@@ -104,8 +98,7 @@ func Test_ImmuerrorIs(t *testing.T) {
 }
 
 func Test_CauseComparisonWrappedError(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "std error"
 	err := errors.New(cause)
@@ -123,8 +116,7 @@ func Test_CauseComparisonWrappedError(t *testing.T) {
 }
 
 func Test_CauseComparisonError(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "std error"
 	err := errors.New(cause).WithCode(errors.CodSqlclientUnableToEstablishSqlConnection)
@@ -141,8 +133,7 @@ func Test_CauseComparisonError(t *testing.T) {
 }
 
 func Test_WrappingImmuerrorWithKnowCode(t *testing.T) {
-	os.Setenv("LOG_LEVEL", "debug")
-	defer os.Unsetenv("LOG_LEVEL")
+	t.Setenv("LOG_LEVEL", "debug")
 
 	cause := "cause error"
 	err := errors.New(cause)

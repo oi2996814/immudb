@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package schema
 
 import (
 	"encoding/hex"
+	"math"
 	"testing"
 	"time"
 
@@ -37,6 +38,12 @@ func TestRowComparison(t *testing.T) {
 	blobValue2 := &SQLValue_Bs{Bs: []byte{1, 2, 3}}
 	tsValue1 := &SQLValue_Ts{Ts: time.Date(2021, 12, 8, 13, 46, 23, 12345000, time.UTC).UnixNano() / 1e3}
 	tsValue2 := &SQLValue_Ts{Ts: time.Date(2020, 11, 7, 12, 45, 22, 12344000, time.UTC).UnixNano() / 1e3}
+	float64Value1 := &SQLValue_F{F: 1.1}
+	float64Value2 := &SQLValue_F{F: .1}
+	float64Value3 := &SQLValue_F{F: 0.0}
+	float64Value4 := &SQLValue_F{F: math.MaxFloat64}
+	float64Value5 := &SQLValue_F{F: -math.MaxFloat64}
+	float64Value6 := &SQLValue_F{F: -0.0}
 
 	equals, err := nullValue.Equal(nullValue)
 	require.NoError(t, err)
@@ -73,7 +80,7 @@ func TestRowComparison(t *testing.T) {
 	require.False(t, equals)
 
 	_, err = intValue1.Equal(trueValue)
-	require.Equal(t, sql.ErrNotComparableValues, err)
+	require.ErrorIs(t, err ,sql.ErrNotComparableValues)
 
 	equals, err = intValue1.Equal(intValue2)
 	require.NoError(t, err)
@@ -185,4 +192,43 @@ func TestRowComparison(t *testing.T) {
 	rTimestampValue := RenderValue(tsv.GetValue())
 	require.Equal(t, "2021-12-08 13:46:23.012345", rTimestampValue)
 
+	ftv := &SQLValue{Value: float64Value1}
+	floatValue := RenderValue(ftv.GetValue())
+	require.Equal(t, "1.1", floatValue)
+	floatValueB := RenderValueAsByte(ftv.GetValue())
+	require.Equal(t, []byte("1.1"), floatValueB)
+	floatValueR := RawValue(ftv)
+	require.Equal(t, 1.1, floatValueR)
+
+	ftv = &SQLValue{Value: float64Value2}
+	floatValue = RenderValue(ftv.GetValue())
+	require.Equal(t, "0.1", floatValue)
+
+	ftv = &SQLValue{Value: float64Value3}
+	floatValue = RenderValue(ftv.GetValue())
+	require.Equal(t, "0", floatValue)
+
+	ftv = &SQLValue{Value: float64Value4}
+	floatValue = RenderValue(ftv.GetValue())
+	require.Equal(t, "179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", floatValue)
+
+	ftv = &SQLValue{Value: float64Value5}
+	floatValue = RenderValue(ftv.GetValue())
+	require.Equal(t, "-179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", floatValue)
+
+	ftv = &SQLValue{Value: float64Value6}
+	floatValue = RenderValue(ftv.GetValue())
+	require.Equal(t, "0", floatValue)
+
+	fakeSV := &SQLValue{Value: &FakeSqlValue{}}
+	fakeValue := RenderValue(fakeSV.GetValue())
+	require.Equal(t, "&{}", fakeValue)
+	fake := RawValue(fakeSV)
+	require.Equal(t, nil, fake)
+	fakeB := RenderValueAsByte(fakeSV.GetValue())
+	require.Equal(t, []byte(`&{}`), fakeB)
 }
+
+type FakeSqlValue struct{}
+
+func (*FakeSqlValue) isSQLValue_Value() {}

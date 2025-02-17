@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,11 @@ limitations under the License.
 package database
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 
 	"github.com/codenotary/immudb/embedded/store"
@@ -34,7 +37,7 @@ const txIDLen = 8
 // As a parameter of ZAddOptions is possible to provide the associated index of the provided key. In this way, when resolving reference, the specified version of the key will be returned.
 // If the index is not provided the resolution will use only the key and last version of the item will be returned
 // If ZAddOptions.index is provided key is optional
-func (d *db) ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error) {
+func (d *db) ZAdd(ctx context.Context, req *schema.ZAddRequest) (*schema.TxHeader, error) {
 	if req == nil || len(req.Set) == 0 || len(req.Key) == 0 {
 		return nil, store.ErrIllegalArguments
 	}
@@ -51,7 +54,7 @@ func (d *db) ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error) {
 	}
 
 	lastTxID, _ := d.st.CommittedAlh()
-	err := d.st.WaitForIndexingUpto(lastTxID, nil)
+	err := d.st.WaitForIndexingUpto(ctx, lastTxID)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +62,7 @@ func (d *db) ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error) {
 	// check referenced key exists and it's not a reference
 	key := EncodeKey(req.Key)
 
-	refEntry, err := d.getAtTx(key, req.AtTx, 0, d.st, 0)
+	refEntry, err := d.getAtTx(ctx, key, req.AtTx, 0, d.st, 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +70,7 @@ func (d *db) ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error) {
 		return nil, ErrReferencedKeyCannotBeAReference
 	}
 
-	tx, err := d.st.NewWriteOnlyTx()
+	tx, err := d.st.NewWriteOnlyTx(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -83,9 +86,9 @@ func (d *db) ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error) {
 	var hdr *store.TxHeader
 
 	if req.NoWait {
-		hdr, err = tx.AsyncCommit()
+		hdr, err = tx.AsyncCommit(ctx)
 	} else {
-		hdr, err = tx.Commit()
+		hdr, err = tx.Commit(ctx)
 	}
 	if err != nil {
 		return nil, err
@@ -95,7 +98,7 @@ func (d *db) ZAdd(req *schema.ZAddRequest) (*schema.TxHeader, error) {
 }
 
 // ZScan ...
-func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
+func (d *db) ZScan(ctx context.Context, req *schema.ZScanRequest) (*schema.ZEntries, error) {
 	if req == nil || len(req.Set) == 0 {
 		return nil, store.ErrIllegalArguments
 	}
@@ -106,7 +109,6 @@ func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
 	}
 
 	limit := int(req.Limit)
-
 	if req.Limit == 0 {
 		limit = d.maxResultSize
 	}
@@ -119,24 +121,6 @@ func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
 	if req.SinceTx > currTxID {
 		return nil, ErrIllegalArguments
 	}
-
-	waitUntilTx := req.SinceTx
-	if waitUntilTx == 0 {
-		waitUntilTx = currTxID
-	}
-
-	if !req.NoWait {
-		err := d.st.WaitForIndexingUpto(waitUntilTx, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	snap, err := d.st.SnapshotSince(waitUntilTx)
-	if err != nil {
-		return nil, err
-	}
-	defer snap.Close()
 
 	prefix := make([]byte, 1+setLenLen+len(req.Set))
 	prefix[0] = SortedSetKeyPrefix
@@ -173,8 +157,14 @@ func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
 		binary.BigEndian.PutUint64(seekKey[len(prefix)+scoreLen+keyLenLen+1+len(req.SeekKey):], req.SeekAtTx)
 	}
 
-	r, err := snap.NewKeyReader(
-		&store.KeyReaderSpec{
+	zsnap, err := d.snapshotSince(ctx, []byte{SortedSetKeyPrefix}, req.SinceTx)
+	if err != nil {
+		return nil, err
+	}
+	defer zsnap.Close()
+
+	r, err := zsnap.NewKeyReader(
+		store.KeyReaderSpec{
 			SeekKey:       seekKey,
 			Prefix:        prefix,
 			InclusiveSeek: req.InclusiveSeek,
@@ -187,11 +177,16 @@ func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
 	}
 	defer r.Close()
 
-	entries := &schema.ZEntries{}
+	kvsnap, err := d.snapshotSince(ctx, []byte{SetKeyPrefix}, req.SinceTx)
+	if err != nil {
+		return nil, err
+	}
+	defer kvsnap.Close()
 
+	entries := &schema.ZEntries{}
 	for l := 1; l <= limit; l++ {
-		zKey, _, err := r.Read()
-		if err == store.ErrNoMoreEntries {
+		zKey, _, err := r.Read(ctx)
+		if errors.Is(err, store.ErrNoMoreEntries) {
 			break
 		}
 		if err != nil {
@@ -217,10 +212,9 @@ func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
 
 		atTx := binary.BigEndian.Uint64(zKey[keyOff+len(key):])
 
-		e, err := d.getAtTx(key, atTx, 1, snap, 0)
-		if err == store.ErrKeyNotFound {
-			// ignore deleted ones (referenced key may have been deleted)
-			continue
+		e, err := d.getAtTx(ctx, key, atTx, 1, kvsnap, 0, true)
+		if errors.Is(err, store.ErrKeyNotFound) || errors.Is(err, io.EOF) {
+			continue // ignore deleted or truncated ones (referenced key may have been deleted or truncated)
 		}
 		if err != nil {
 			return nil, err
@@ -235,19 +229,13 @@ func (d *db) ZScan(req *schema.ZScanRequest) (*schema.ZEntries, error) {
 		}
 
 		entries.Entries = append(entries.Entries, zentry)
-
-		if l == d.maxResultSize {
-			return entries, fmt.Errorf("%w: found at least %d entries (the maximum limit). "+
-				"Pagination over large results can be achieved by using the limit, seekKey, seekScore and seekAtTx arguments",
-				ErrResultSizeLimitReached, d.maxResultSize)
-		}
 	}
 
 	return entries, nil
 }
 
 // VerifiableZAdd ...
-func (d *db) VerifiableZAdd(req *schema.VerifiableZAddRequest) (*schema.VerifiableTx, error) {
+func (d *db) VerifiableZAdd(ctx context.Context, req *schema.VerifiableZAddRequest) (*schema.VerifiableTx, error) {
 	if req == nil {
 		return nil, store.ErrIllegalArguments
 	}
@@ -263,12 +251,12 @@ func (d *db) VerifiableZAdd(req *schema.VerifiableZAddRequest) (*schema.Verifiab
 	}
 	defer d.releaseTx(lastTx)
 
-	txMetatadata, err := d.ZAdd(req.ZAddRequest)
+	txMetatadata, err := d.ZAdd(ctx, req.ZAddRequest)
 	if err != nil {
 		return nil, err
 	}
 
-	err = d.st.ReadTx(uint64(txMetatadata.Id), lastTx)
+	err = d.st.ReadTx(uint64(txMetatadata.Id), false, lastTx)
 	if err != nil {
 		return nil, err
 	}
@@ -277,7 +265,7 @@ func (d *db) VerifiableZAdd(req *schema.VerifiableZAddRequest) (*schema.Verifiab
 	if req.ProveSinceTx == 0 {
 		prevTxHdr = lastTx.Header()
 	} else {
-		prevTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false)
+		prevTxHdr, err = d.st.ReadTxHeader(req.ProveSinceTx, false, false)
 		if err != nil {
 			return nil, err
 		}

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,7 +53,7 @@ func (ss *MockedServerStream) Context() context.Context {
 		},
 	}
 
-	return peer.NewContext(context.TODO(), p)
+	return peer.NewContext(context.Background(), p)
 }
 
 func (ss *MockedServerStream) SendMsg(m interface{}) error {
@@ -92,7 +92,7 @@ func TestServerStreamInterceptorTampered(t *testing.T) {
 	}
 
 	sh := ServerStreamInterceptor(nil, &MockedServerStream{}, nil, h)
-	require.Error(t, sh)
+	require.ErrorContains(t, sh, "the database should be checked manually as we detected possible tampering")
 
 }
 
@@ -108,7 +108,7 @@ func TestServerStreamInterceptorNoAuth(t *testing.T) {
 	}
 
 	sh := ServerStreamInterceptor(nil, &MockedServerStream{}, nil, h)
-	require.Error(t, sh)
+	require.ErrorContains(t, sh, "server has authentication disabled: only local connections are accepted")
 
 }
 
@@ -138,7 +138,7 @@ func TestServerUnaryInterceptorTampered(t *testing.T) {
 	}
 
 	_, err := ServerUnaryInterceptor(context.Background(), "method", nil, h)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "the database should be checked manually as we detected possible tampering")
 }
 
 func TestServerUnaryInterceptorNoAuth(t *testing.T) {
@@ -152,5 +152,5 @@ func TestServerUnaryInterceptorNoAuth(t *testing.T) {
 	}
 
 	_, err := ServerUnaryInterceptor(context.Background(), "method", nil, h)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "server has authentication disabled: only local connections are accepted")
 }

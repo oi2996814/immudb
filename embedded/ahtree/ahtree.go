@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,8 +71,8 @@ type AHtree struct {
 	cLogBuf      []byte
 	cLogBufCount int
 
-	pCache *cache.LRUCache
-	dCache *cache.LRUCache
+	pCache *cache.Cache
+	dCache *cache.Cache
 
 	syncThld int
 	readOnly bool
@@ -171,12 +171,12 @@ func OpenWith(pLog, dLog, cLog appendable.Appendable, opts *Options) (*AHtree, e
 
 	latestSyncedNode := uint64(cLogSize / cLogEntrySize)
 
-	pCache, err := cache.NewLRUCache(opts.dataCacheSlots)
+	pCache, err := cache.NewCache(opts.dataCacheSlots)
 	if err != nil {
 		return nil, err
 	}
 
-	dCache, err := cache.NewLRUCache(opts.digestsCacheSlots)
+	dCache, err := cache.NewCache(opts.digestsCacheSlots)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,11 @@ func OpenWith(pLog, dLog, cLog appendable.Appendable, opts *Options) (*AHtree, e
 	pOff := binary.BigEndian.Uint64(b[:])
 	pSize := binary.BigEndian.Uint32(b[offsetSize:])
 
-	t.pLogSize = int64(pOff) + int64(pSize)
+	// pOff denotes the latest payload
+	// pSize denotes the size of the latest payload
+	// as payloads are prefixed with the size when written into pLog
+	// pLogSize is calculated with the offset, the size description of the payload and the payload itself
+	t.pLogSize = int64(pOff) + int64(szSize+pSize)
 
 	pLogFileSize, err := pLog.Size()
 	if err != nil {
@@ -409,7 +413,11 @@ func (t *AHtree) ResetSize(newSize uint64) error {
 		pOff := binary.BigEndian.Uint64(b[:])
 		pSize := binary.BigEndian.Uint32(b[offsetSize:])
 
-		pLogSize = int64(pOff) + int64(pSize)
+		// pOff denotes the latest payload
+		// pSize denotes the size of the latest payload
+		// as payloads are prefixed with the size when written into pLog
+		// pLogSize is calculated with the offset, the size description of the payload and the payload itself
+		pLogSize = int64(pOff) + int64(szSize+pSize)
 
 		pLogFileSize, err := t.pLog.Size()
 		if err != nil {

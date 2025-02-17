@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/codenotary/immudb/pkg/server/sessions"
+	"github.com/codenotary/immudb/pkg/truncator"
 
 	"github.com/codenotary/immudb/embedded/remotestorage"
 	pgsqlsrv "github.com/codenotary/immudb/pkg/pgsql/server"
@@ -35,30 +36,35 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/auth"
 	"github.com/codenotary/immudb/pkg/immuos"
-	"github.com/codenotary/immudb/pkg/logger"
 )
 
-// userDatabasePairs keeps an associacion of username to userdata
+// usernameToUserdataMap keeps an associacion of username to userdata
 type usernameToUserdataMap struct {
 	Userdata map[string]*auth.User
 	sync.RWMutex
 }
 
 // defaultDbIndex systemdb should always be in index 0
-const defaultDbIndex = 0
-const sysDBIndex = math.MaxInt32
+const (
+	defaultDbIndex = 0
+	sysDBIndex     = math.MaxInt32
+)
 
 // ImmuServer ...
 type ImmuServer struct {
 	OS immuos.OS
 
+	dbListMutex sync.Mutex
 	dbList      database.DatabaseList
-	dbListMutex sync.Mutex // TODO: convert dbList into a dbManager capable of opening/closing/deleting dbs
 
 	replicators      map[string]*replication.TxReplicator
 	replicationMutex sync.Mutex
+
+	truncators     map[string]*truncator.Truncator
+	truncatorMutex sync.Mutex
 
 	Logger      logger.Logger
 	Options     *Options
@@ -77,19 +83,18 @@ type ImmuServer struct {
 	pgsqlMux             sync.Mutex
 	StateSigner          StateSigner
 	StreamServiceFactory stream.ServiceFactory
-	PgsqlSrv             pgsqlsrv.Server
+	PgsqlSrv             pgsqlsrv.PGSQLServer
 
 	remoteStorage remotestorage.Storage
-
-	SessManager sessions.Manager
+	SessManager   sessions.Manager
 }
 
-// DefaultServer ...
+// DefaultServer returns a new ImmuServer instance with all configuration options set to their default values.
 func DefaultServer() *ImmuServer {
-	return &ImmuServer{
+	s := &ImmuServer{
 		OS:                   immuos.NewStandardOS(),
-		dbList:               database.NewDatabaseList(),
 		replicators:          make(map[string]*replication.TxReplicator),
+		truncators:           make(map[string]*truncator.Truncator),
 		Logger:               logger.NewSimpleLogger("immudb ", os.Stderr),
 		Options:              DefaultOptions(),
 		quit:                 make(chan struct{}),
@@ -97,6 +102,11 @@ func DefaultServer() *ImmuServer {
 		GrpcServer:           grpc.NewServer(),
 		StreamServiceFactory: stream.NewStreamServiceFactory(DefaultOptions().StreamChunkSize),
 	}
+
+	s.dbList = database.NewDatabaseList(database.NewDBManager(func(name string, opts *database.Options) (database.DB, error) {
+		return database.OpenDB(name, s.multidbHandler(), opts, s.Logger)
+	}, s.Options.MaxActiveDatabases, s.Logger))
+	return s
 }
 
 type ImmuServerIf interface {
@@ -107,7 +117,7 @@ type ImmuServerIf interface {
 	WithLogger(logger.Logger) ImmuServerIf
 	WithStateSigner(stateSigner StateSigner) ImmuServerIf
 	WithStreamServiceFactory(ssf stream.ServiceFactory) ImmuServerIf
-	WithPgsqlServer(psrv pgsqlsrv.Server) ImmuServerIf
+	WithPgsqlServer(psrv pgsqlsrv.PGSQLServer) ImmuServerIf
 	WithDbList(dbList database.DatabaseList) ImmuServerIf
 }
 
@@ -135,7 +145,7 @@ func (s *ImmuServer) WithOptions(options *Options) ImmuServerIf {
 }
 
 // WithPgsqlServer ...
-func (s *ImmuServer) WithPgsqlServer(psrv pgsqlsrv.Server) ImmuServerIf {
+func (s *ImmuServer) WithPgsqlServer(psrv pgsqlsrv.PGSQLServer) ImmuServerIf {
 	s.PgsqlSrv = psrv
 	return s
 }

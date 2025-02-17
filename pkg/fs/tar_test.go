@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ package fs
 
 import (
 	"errors"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -164,7 +165,8 @@ func TestUnTarNonArchiveSrc(t *testing.T) {
 	require.NoError(t, ioutil.WriteFile(src, []byte("content"), 0644))
 	tarer := NewStandardTarer()
 	dst := filepath.Join(t.TempDir(), "dst")
-	require.Error(t, tarer.UnTarIt(src, dst))
+	err := tarer.UnTarIt(src, dst)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
 func TestUnTarMkdirAllSubDirError(t *testing.T) {
@@ -184,7 +186,8 @@ func TestUnTarMkdirAllSubDirError(t *testing.T) {
 		}
 		return os.MkdirAll(path, perm)
 	}
-	require.Equal(t, errMkdirAll, tarer.UnTarIt(dst, filepath.Join(t.TempDir(), "dst2")))
+	err := tarer.UnTarIt(dst, filepath.Join(t.TempDir(), "dst2"))
+	require.ErrorIs(t, err, errMkdirAll)
 }
 
 func TestUnTarOpenFileError(t *testing.T) {
@@ -199,5 +202,6 @@ func TestUnTarOpenFileError(t *testing.T) {
 	tarer.OS.(*immuos.StandardOS).OpenFileF = func(name string, flag int, perm os.FileMode) (*os.File, error) {
 		return nil, errOpenFile
 	}
-	require.Equal(t, errOpenFile, tarer.UnTarIt(dst, filepath.Join(t.TempDir(), "dst2")))
+	err := tarer.UnTarIt(dst, filepath.Join(t.TempDir(), "dst2"))
+	require.ErrorIs(t, err, errOpenFile)
 }

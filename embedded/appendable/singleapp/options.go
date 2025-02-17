@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -42,6 +42,9 @@ type Options struct {
 	compressionFormat int
 	compressionLevel  int
 
+	preallocSize      int
+	createIfNotExists bool
+
 	metadata []byte
 }
 
@@ -50,6 +53,7 @@ func DefaultOptions() *Options {
 		readOnly:          false,
 		retryableSync:     true,
 		autoSync:          true,
+		createIfNotExists: true,
 		fileMode:          DefaultFileMode,
 		compressionFormat: DefaultCompressionFormat,
 		compressionLevel:  DefaultCompressionLevel,
@@ -69,6 +73,10 @@ func (opts *Options) Validate() error {
 
 	if !opts.readOnly && len(opts.writeBuffer) == 0 {
 		return fmt.Errorf("%w: invalid writeBuffer", ErrInvalidOptions)
+	}
+
+	if opts.preallocSize < 0 {
+		return fmt.Errorf("%w: invalid preallocSize", ErrInvalidOptions)
 	}
 
 	return nil
@@ -99,6 +107,16 @@ func (opts *Options) WithCompressionFormat(compressionFormat int) *Options {
 	return opts
 }
 
+func (opts *Options) WithPreallocSize(preallocSize int) *Options {
+	opts.preallocSize = preallocSize
+	return opts
+}
+
+func (opts *Options) WithCreateIfNotExists(createIfNotExists bool) *Options {
+	opts.createIfNotExists = createIfNotExists
+	return opts
+}
+
 func (opts *Options) GetCompressionFormat() int {
 	return opts.compressionFormat
 }
@@ -109,6 +127,10 @@ func (opts *Options) GetCompressionLevel() int {
 
 func (opts *Options) GetReadBufferSize() int {
 	return opts.readBufferSize
+}
+
+func (opts *Options) GetPreallocSize() int {
+	return opts.preallocSize
 }
 
 func (opts *Options) GetWriteBuffer() []byte {

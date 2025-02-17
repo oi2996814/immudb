@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,9 +30,9 @@ import (
 )
 
 func TestSignatureVerifierInterceptor(t *testing.T) {
-
 	pk, err := signer.ParsePublicKeyFile("./../../test/signer/ec1.pub")
 	require.NoError(t, err)
+
 	c := ic.NewClient().WithServerSigningPubKey(pk)
 
 	// creation and state sign
@@ -40,8 +40,10 @@ func TestSignatureVerifierInterceptor(t *testing.T) {
 		TxId:   0,
 		TxHash: []byte(`hash`),
 	}
+
 	sig, err := signer.NewSigner("./../../test/signer/ec1.key")
 	require.NoError(t, err)
+
 	stSig := server.NewStateSigner(sig)
 	err = stSig.Sign(state)
 	require.NoError(t, err)
@@ -50,15 +52,14 @@ func TestSignatureVerifierInterceptor(t *testing.T) {
 		return nil
 	}
 
-	err = c.SignatureVerifierInterceptor(context.TODO(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
-
+	err = c.SignatureVerifierInterceptor(context.Background(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
 	require.NoError(t, err)
-
 }
 
 func TestSignatureVerifierInterceptorUnableToVerify(t *testing.T) {
 	pk, err := signer.ParsePublicKeyFile("./../../test/signer/ec1.pub")
 	require.NoError(t, err)
+
 	c := ic.NewClient().WithServerSigningPubKey(pk)
 
 	// creation and state sign
@@ -70,16 +71,19 @@ func TestSignatureVerifierInterceptorUnableToVerify(t *testing.T) {
 			Signature: []byte(`boom`),
 		},
 	}
+
 	invoker := func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
 		return nil
 	}
-	err = c.SignatureVerifierInterceptor(context.TODO(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
-	require.Error(t, err)
+
+	err = c.SignatureVerifierInterceptor(context.Background(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
+	require.ErrorContains(t, err, "unable to verify signature")
 }
 
 func TestSignatureVerifierInterceptorSignatureDoesntMatch(t *testing.T) {
 	pk, err := signer.ParsePublicKeyFile("./../../test/signer/ec1.pub")
 	require.NoError(t, err)
+
 	c := ic.NewClient().WithServerSigningPubKey(pk)
 
 	// creation and state sign
@@ -89,7 +93,9 @@ func TestSignatureVerifierInterceptorSignatureDoesntMatch(t *testing.T) {
 	}
 	sig, err := signer.NewSigner("./../../test/signer/ec3.key")
 	require.NoError(t, err)
+
 	stSig := server.NewStateSigner(sig)
+
 	err = stSig.Sign(state)
 	require.NoError(t, err)
 
@@ -97,13 +103,13 @@ func TestSignatureVerifierInterceptorSignatureDoesntMatch(t *testing.T) {
 		return nil
 	}
 
-	err = c.SignatureVerifierInterceptor(context.TODO(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
-
-	require.Error(t, err)
+	err = c.SignatureVerifierInterceptor(context.Background(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
+	require.ErrorContains(t, err, signer.ErrKeyCannotBeVerified.Error())
 }
 
 func TestSignatureVerifierInterceptorNoPublicKey(t *testing.T) {
 	c := ic.NewClient().WithServerSigningPubKey(nil)
+
 	// creation and state sign
 	state := &schema.ImmutableState{
 		TxId:   0,
@@ -114,7 +120,6 @@ func TestSignatureVerifierInterceptorNoPublicKey(t *testing.T) {
 		return nil
 	}
 
-	err := c.SignatureVerifierInterceptor(context.TODO(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
-
-	require.Error(t, err)
+	err := c.SignatureVerifierInterceptor(context.Background(), "/immudb.schema.ImmuService/CurrentState", &empty.Empty{}, state, nil, invoker, nil)
+	require.ErrorContains(t, err, "public key not loaded")
 }

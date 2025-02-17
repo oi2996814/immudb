@@ -8,7 +8,10 @@
     - [AuthConfig](#immudb.schema.AuthConfig)
     - [ChangePasswordRequest](#immudb.schema.ChangePasswordRequest)
     - [ChangePermissionRequest](#immudb.schema.ChangePermissionRequest)
+    - [ChangeSQLPrivilegesRequest](#immudb.schema.ChangeSQLPrivilegesRequest)
+    - [ChangeSQLPrivilegesResponse](#immudb.schema.ChangeSQLPrivilegesResponse)
     - [Chunk](#immudb.schema.Chunk)
+    - [Chunk.MetadataEntry](#immudb.schema.Chunk.MetadataEntry)
     - [Column](#immudb.schema.Column)
     - [CommittedSQLTx](#immudb.schema.CommittedSQLTx)
     - [CommittedSQLTx.FirstInsertedPKsEntry](#immudb.schema.CommittedSQLTx.FirstInsertedPKsEntry)
@@ -18,6 +21,7 @@
     - [CreateUserRequest](#immudb.schema.CreateUserRequest)
     - [Database](#immudb.schema.Database)
     - [DatabaseHealthResponse](#immudb.schema.DatabaseHealthResponse)
+    - [DatabaseInfo](#immudb.schema.DatabaseInfo)
     - [DatabaseListRequestV2](#immudb.schema.DatabaseListRequestV2)
     - [DatabaseListResponse](#immudb.schema.DatabaseListResponse)
     - [DatabaseListResponseV2](#immudb.schema.DatabaseListResponseV2)
@@ -25,12 +29,12 @@
     - [DatabaseSettings](#immudb.schema.DatabaseSettings)
     - [DatabaseSettingsRequest](#immudb.schema.DatabaseSettingsRequest)
     - [DatabaseSettingsResponse](#immudb.schema.DatabaseSettingsResponse)
-    - [DatabaseWithSettings](#immudb.schema.DatabaseWithSettings)
     - [DebugInfo](#immudb.schema.DebugInfo)
     - [DeleteDatabaseRequest](#immudb.schema.DeleteDatabaseRequest)
     - [DeleteDatabaseResponse](#immudb.schema.DeleteDatabaseResponse)
     - [DeleteKeysRequest](#immudb.schema.DeleteKeysRequest)
     - [DualProof](#immudb.schema.DualProof)
+    - [DualProofV2](#immudb.schema.DualProofV2)
     - [Entries](#immudb.schema.Entries)
     - [EntriesSpec](#immudb.schema.EntriesSpec)
     - [Entry](#immudb.schema.Entry)
@@ -42,7 +46,6 @@
     - [ExportTxRequest](#immudb.schema.ExportTxRequest)
     - [FlushIndexRequest](#immudb.schema.FlushIndexRequest)
     - [FlushIndexResponse](#immudb.schema.FlushIndexResponse)
-    - [FollowerState](#immudb.schema.FollowerState)
     - [HealthResponse](#immudb.schema.HealthResponse)
     - [HistoryRequest](#immudb.schema.HistoryRequest)
     - [ImmutableState](#immudb.schema.ImmutableState)
@@ -54,6 +57,7 @@
     - [KeyPrefix](#immudb.schema.KeyPrefix)
     - [KeyRequest](#immudb.schema.KeyRequest)
     - [KeyValue](#immudb.schema.KeyValue)
+    - [LinearAdvanceProof](#immudb.schema.LinearAdvanceProof)
     - [LinearProof](#immudb.schema.LinearProof)
     - [LoadDatabaseRequest](#immudb.schema.LoadDatabaseRequest)
     - [LoadDatabaseResponse](#immudb.schema.LoadDatabaseResponse)
@@ -79,6 +83,7 @@
     - [Precondition.KeyNotModifiedAfterTXPrecondition](#immudb.schema.Precondition.KeyNotModifiedAfterTXPrecondition)
     - [Reference](#immudb.schema.Reference)
     - [ReferenceRequest](#immudb.schema.ReferenceRequest)
+    - [ReplicaState](#immudb.schema.ReplicaState)
     - [ReplicationNullableSettings](#immudb.schema.ReplicationNullableSettings)
     - [RetryInfo](#immudb.schema.RetryInfo)
     - [Row](#immudb.schema.Row)
@@ -86,6 +91,7 @@
     - [SQLExecRequest](#immudb.schema.SQLExecRequest)
     - [SQLExecResult](#immudb.schema.SQLExecResult)
     - [SQLGetRequest](#immudb.schema.SQLGetRequest)
+    - [SQLPrivilege](#immudb.schema.SQLPrivilege)
     - [SQLQueryRequest](#immudb.schema.SQLQueryRequest)
     - [SQLQueryResult](#immudb.schema.SQLQueryResult)
     - [SQLValue](#immudb.schema.SQLValue)
@@ -97,6 +103,9 @@
     - [SetRequest](#immudb.schema.SetRequest)
     - [Signature](#immudb.schema.Signature)
     - [Table](#immudb.schema.Table)
+    - [TruncateDatabaseRequest](#immudb.schema.TruncateDatabaseRequest)
+    - [TruncateDatabaseResponse](#immudb.schema.TruncateDatabaseResponse)
+    - [TruncationNullableSettings](#immudb.schema.TruncationNullableSettings)
     - [Tx](#immudb.schema.Tx)
     - [TxEntry](#immudb.schema.TxEntry)
     - [TxHeader](#immudb.schema.TxHeader)
@@ -125,6 +134,7 @@
     - [VerifiableSetRequest](#immudb.schema.VerifiableSetRequest)
     - [VerifiableTx](#immudb.schema.VerifiableTx)
     - [VerifiableTxRequest](#immudb.schema.VerifiableTxRequest)
+    - [VerifiableTxV2](#immudb.schema.VerifiableTxV2)
     - [VerifiableZAddRequest](#immudb.schema.VerifiableZAddRequest)
     - [ZAddRequest](#immudb.schema.ZAddRequest)
     - [ZEntries](#immudb.schema.ZEntries)
@@ -214,6 +224,34 @@ DEPRECATED
 
 
 
+<a name="immudb.schema.ChangeSQLPrivilegesRequest"></a>
+
+### ChangeSQLPrivilegesRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| action | [PermissionAction](#immudb.schema.PermissionAction) |  | Action to perform |
+| username | [string](#string) |  | Name of the user to update |
+| database | [string](#string) |  | Name of the database |
+| privileges | [string](#string) | repeated | SQL privileges: SELECT, CREATE, INSERT, UPDATE, DELETE, DROP, ALTER |
+
+
+
+
+
+
+<a name="immudb.schema.ChangeSQLPrivilegesResponse"></a>
+
+### ChangeSQLPrivilegesResponse
+
+
+
+
+
+
+
 <a name="immudb.schema.Chunk"></a>
 
 ### Chunk
@@ -223,6 +261,23 @@ DEPRECATED
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | content | [bytes](#bytes) |  |  |
+| metadata | [Chunk.MetadataEntry](#immudb.schema.Chunk.MetadataEntry) | repeated |  |
+
+
+
+
+
+
+<a name="immudb.schema.Chunk.MetadataEntry"></a>
+
+### Chunk.MetadataEntry
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| key | [string](#string) |  |  |
+| value | [bytes](#bytes) |  |  |
 
 
 
@@ -378,6 +433,27 @@ DEPRECATED
 
 
 
+<a name="immudb.schema.DatabaseInfo"></a>
+
+### DatabaseInfo
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | Database name |
+| settings | [DatabaseNullableSettings](#immudb.schema.DatabaseNullableSettings) |  | Current database settings |
+| loaded | [bool](#bool) |  | If true, this database is currently loaded into memory |
+| diskSize | [uint64](#uint64) |  | database disk size |
+| numTransactions | [uint64](#uint64) |  | total number of transactions |
+| created_at | [uint64](#uint64) |  | the time when the db was created |
+| created_by | [string](#string) |  | the user who created the database |
+
+
+
+
+
+
 <a name="immudb.schema.DatabaseListRequestV2"></a>
 
 ### DatabaseListRequestV2
@@ -411,7 +487,7 @@ DEPRECATED
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| databases | [DatabaseWithSettings](#immudb.schema.DatabaseWithSettings) | repeated | Database list with current database settings |
+| databases | [DatabaseInfo](#immudb.schema.DatabaseInfo) | repeated | Database list with current database settings |
 
 
 
@@ -434,7 +510,7 @@ DEPRECATED
 | excludeCommitTime | [NullableBool](#immudb.schema.NullableBool) |  | If set to true, do not include commit timestamp in transaction headers |
 | maxConcurrency | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of simultaneous commits prepared for write |
 | maxIOConcurrency | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of simultaneous IO writes |
-| txLogCacheSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the LRU cache for transaction logs |
+| txLogCacheSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the cache for transaction logs |
 | vLogMaxOpenedFiles | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of simultaneous value files opened |
 | txLogMaxOpenedFiles | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of simultaneous transaction log files opened |
 | commitLogMaxOpenedFiles | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of simultaneous commit log files opened |
@@ -445,6 +521,12 @@ DEPRECATED
 | syncFrequency | [NullableMilliseconds](#immudb.schema.NullableMilliseconds) |  | Fsync frequency during commit process |
 | writeBufferSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the in-memory buffer for write operations |
 | ahtSettings | [AHTNullableSettings](#immudb.schema.AHTNullableSettings) |  | Settings of Appendable Hash Tree |
+| maxActiveTransactions | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of pre-committed transactions |
+| mvccReadSetLimit | [NullableUint32](#immudb.schema.NullableUint32) |  | Limit the number of read entries per transaction |
+| vLogCacheSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the cache for value logs |
+| truncationSettings | [TruncationNullableSettings](#immudb.schema.TruncationNullableSettings) |  | Truncation settings |
+| embeddedValues | [NullableBool](#immudb.schema.NullableBool) |  | If set to true, values are stored together with the transaction header (true by default) |
+| preallocFiles | [NullableBool](#immudb.schema.NullableBool) |  | Enable file preallocation |
 
 
 
@@ -461,11 +543,11 @@ DEPRECATED
 | ----- | ---- | ----- | ----------- |
 | databaseName | [string](#string) |  | Name of the database |
 | replica | [bool](#bool) |  | If set to true, this database is replicating another database |
-| masterDatabase | [string](#string) |  | Name of the database to replicate |
-| masterAddress | [string](#string) |  | Hostname of the immudb instance with database to replicate |
-| masterPort | [uint32](#uint32) |  | Port of the immudb instance with database to replicate |
-| followerUsername | [string](#string) |  | Username of the user with read access of the database to replicate |
-| followerPassword | [string](#string) |  | Password of the user with read access of the database to replicate |
+| primaryDatabase | [string](#string) |  | Name of the database to replicate |
+| primaryHost | [string](#string) |  | Hostname of the immudb instance with database to replicate |
+| primaryPort | [uint32](#uint32) |  | Port of the immudb instance with database to replicate |
+| primaryUsername | [string](#string) |  | Username of the user with read access of the database to replicate |
+| primaryPassword | [string](#string) |  | Password of the user with read access of the database to replicate |
 | fileSize | [uint32](#uint32) |  | Size of files stored on disk |
 | maxKeyLen | [uint32](#uint32) |  | Maximum length of keys |
 | maxValueLen | [uint32](#uint32) |  | Maximum length of values |
@@ -497,23 +579,6 @@ DEPRECATED
 | ----- | ---- | ----- | ----------- |
 | database | [string](#string) |  | Database name |
 | settings | [DatabaseNullableSettings](#immudb.schema.DatabaseNullableSettings) |  | Database settings |
-
-
-
-
-
-
-<a name="immudb.schema.DatabaseWithSettings"></a>
-
-### DatabaseWithSettings
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| name | [string](#string) |  | Database name |
-| settings | [DatabaseNullableSettings](#immudb.schema.DatabaseNullableSettings) |  | Current database settings |
-| loaded | [bool](#bool) |  | If true, this database is currently loaded into memory |
 
 
 
@@ -597,6 +662,25 @@ DualProof contains inclusion and consistency proofs for dual Merkle-Tree &#43; L
 | targetBlTxAlh | [bytes](#bytes) |  | Accumulative hash (Alh) of the last transaction that&#39;s part of the target Merkle Tree |
 | lastInclusionProof | [bytes](#bytes) | repeated | Inclusion proof of the targetBlTxAlh in the target Merkle Tree |
 | linearProof | [LinearProof](#immudb.schema.LinearProof) |  | Linear proof starting from targetBlTxAlh to the final state value |
+| LinearAdvanceProof | [LinearAdvanceProof](#immudb.schema.LinearAdvanceProof) |  | Proof of consistency between some part of older linear chain and newer Merkle Tree |
+
+
+
+
+
+
+<a name="immudb.schema.DualProofV2"></a>
+
+### DualProofV2
+DualProofV2 contains inclusion and consistency proofs
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| sourceTxHeader | [TxHeader](#immudb.schema.TxHeader) |  | Header of the source (earlier) transaction |
+| targetTxHeader | [TxHeader](#immudb.schema.TxHeader) |  | Header of the target (latter) transaction |
+| inclusionProof | [bytes](#bytes) | repeated | Inclusion proof of the source transaction hash in the main Merkle Tree |
+| consistencyProof | [bytes](#bytes) | repeated | Consistency proof between Merkle Trees in the source and target transactions |
 
 
 
@@ -744,7 +828,8 @@ DualProof contains inclusion and consistency proofs for dual Merkle-Tree &#43; L
 | ----- | ---- | ----- | ----------- |
 | tx | [uint64](#uint64) |  | Id of transaction to export |
 | allowPreCommitted | [bool](#bool) |  | If set to true, non-committed transactions can be exported |
-| followerState | [FollowerState](#immudb.schema.FollowerState) |  | Used on synchronous replication to notify the master about follower state |
+| replicaState | [ReplicaState](#immudb.schema.ReplicaState) |  | Used on synchronous replication to notify the primary about replica state |
+| skipIntegrityCheck | [bool](#bool) |  | If set to true, integrity checks are skipped when reading data |
 
 
 
@@ -776,25 +861,6 @@ DualProof contains inclusion and consistency proofs for dual Merkle-Tree &#43; L
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | database | [string](#string) |  | Database name |
-
-
-
-
-
-
-<a name="immudb.schema.FollowerState"></a>
-
-### FollowerState
-
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| UUID | [string](#string) |  |  |
-| committedTxID | [uint64](#uint64) |  |  |
-| committedAlh | [bytes](#bytes) |  |  |
-| precommittedTxID | [uint64](#uint64) |  |  |
-| precommittedAlh | [bytes](#bytes) |  |  |
 
 
 
@@ -883,7 +949,7 @@ DualProof contains inclusion and consistency proofs for dual Merkle-Tree &#43; L
 | ----- | ---- | ----- | ----------- |
 | flushThreshold | [NullableUint32](#immudb.schema.NullableUint32) |  | Number of new index entries between disk flushes |
 | syncThreshold | [NullableUint32](#immudb.schema.NullableUint32) |  | Number of new index entries between disk flushes with file sync |
-| cacheSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the Btree node LRU cache |
+| cacheSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the Btree node cache in bytes |
 | maxNodeSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Max size of a single Btree node in bytes |
 | maxActiveSnapshots | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of active btree snapshots |
 | renewSnapRootAfter | [NullableUint64](#immudb.schema.NullableUint64) |  | Time in milliseconds between the most recent DB snapshot is automatically renewed |
@@ -894,6 +960,8 @@ DualProof contains inclusion and consistency proofs for dual Merkle-Tree &#43; L
 | commitLogMaxOpenedFiles | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of simultaneously opened commit log files |
 | flushBufferSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Size of the in-memory flush buffer (in bytes) |
 | cleanupPercentage | [NullableFloat](#immudb.schema.NullableFloat) |  | Percentage of node files cleaned up during each flush |
+| maxBulkSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of transactions indexed together |
+| bulkPreparationTimeout | [NullableMilliseconds](#immudb.schema.NullableMilliseconds) |  | Maximum time waiting for more transactions to be committed and included into the same bulk |
 
 
 
@@ -993,6 +1061,23 @@ DualProof contains inclusion and consistency proofs for dual Merkle-Tree &#43; L
 | key | [bytes](#bytes) |  |  |
 | value | [bytes](#bytes) |  |  |
 | metadata | [KVMetadata](#immudb.schema.KVMetadata) |  |  |
+
+
+
+
+
+
+<a name="immudb.schema.LinearAdvanceProof"></a>
+
+### LinearAdvanceProof
+LinearAdvanceProof contains the proof of consistency between the consumed part of the older linear chain
+and the new Merkle Tree
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| linearProofTerms | [bytes](#bytes) | repeated | terms for the linear chain |
+| inclusionProofs | [InclusionProof](#immudb.schema.InclusionProof) | repeated | inclusion proofs for steps on the linear chain |
 
 
 
@@ -1120,6 +1205,9 @@ DEPRECATED
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | mode | [TxMode](#immudb.schema.TxMode) |  | Transaction mode |
+| snapshotMustIncludeTxID | [NullableUint64](#immudb.schema.NullableUint64) |  | An existing snapshot may be reused as long as it includes the specified transaction If not specified it will include up to the latest precommitted transaction |
+| snapshotRenewalPeriod | [NullableMilliseconds](#immudb.schema.NullableMilliseconds) |  | An existing snapshot may be reused as long as it is not older than the specified timeframe |
+| unsafeMVCC | [bool](#bool) |  | Indexing may not be up to date when doing MVCC |
 
 
 
@@ -1399,6 +1487,25 @@ Only succeed if given key was not modified after given transaction
 
 
 
+<a name="immudb.schema.ReplicaState"></a>
+
+### ReplicaState
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| UUID | [string](#string) |  |  |
+| committedTxID | [uint64](#uint64) |  |  |
+| committedAlh | [bytes](#bytes) |  |  |
+| precommittedTxID | [uint64](#uint64) |  |  |
+| precommittedAlh | [bytes](#bytes) |  |  |
+
+
+
+
+
+
 <a name="immudb.schema.ReplicationNullableSettings"></a>
 
 ### ReplicationNullableSettings
@@ -1408,16 +1515,18 @@ Only succeed if given key was not modified after given transaction
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | replica | [NullableBool](#immudb.schema.NullableBool) |  | If set to true, this database is replicating another database |
-| masterDatabase | [NullableString](#immudb.schema.NullableString) |  | Name of the database to replicate |
-| masterAddress | [NullableString](#immudb.schema.NullableString) |  | Hostname of the immudb instance with database to replicate |
-| masterPort | [NullableUint32](#immudb.schema.NullableUint32) |  | Port of the immudb instance with database to replicate |
-| followerUsername | [NullableString](#immudb.schema.NullableString) |  | Username of the user with read access of the database to replicate |
-| followerPassword | [NullableString](#immudb.schema.NullableString) |  | Password of the user with read access of the database to replicate |
+| primaryDatabase | [NullableString](#immudb.schema.NullableString) |  | Name of the database to replicate |
+| primaryHost | [NullableString](#immudb.schema.NullableString) |  | Hostname of the immudb instance with database to replicate |
+| primaryPort | [NullableUint32](#immudb.schema.NullableUint32) |  | Port of the immudb instance with database to replicate |
+| primaryUsername | [NullableString](#immudb.schema.NullableString) |  | Username of the user with read access of the database to replicate |
+| primaryPassword | [NullableString](#immudb.schema.NullableString) |  | Password of the user with read access of the database to replicate |
 | syncReplication | [NullableBool](#immudb.schema.NullableBool) |  | Enable synchronous replication |
 | syncAcks | [NullableUint32](#immudb.schema.NullableUint32) |  | Number of confirmations from synchronous replicas required to commit a transaction |
 | prefetchTxBufferSize | [NullableUint32](#immudb.schema.NullableUint32) |  | Maximum number of prefetched transactions |
 | replicationCommitConcurrency | [NullableUint32](#immudb.schema.NullableUint32) |  | Number of concurrent replications |
-| AllowTxDiscarding | [NullableBool](#immudb.schema.NullableBool) |  | Allow precommitted transactions to be discarded if the follower diverges from the master |
+| allowTxDiscarding | [NullableBool](#immudb.schema.NullableBool) |  | Allow precommitted transactions to be discarded if the replica diverges from the primary |
+| skipIntegrityCheck | [NullableBool](#immudb.schema.NullableBool) |  | Disable integrity check when reading data during replication |
+| waitForIndexing | [NullableBool](#immudb.schema.NullableBool) |  | Wait for indexing to be up to date during replication |
 
 
 
@@ -1524,6 +1633,22 @@ Only succeed if given key was not modified after given transaction
 
 
 
+<a name="immudb.schema.SQLPrivilege"></a>
+
+### SQLPrivilege
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| database | [string](#string) |  | Database name |
+| privilege | [string](#string) |  | Privilege: SELECT, CREATE, INSERT, UPDATE, DELETE, DROP, ALTER |
+
+
+
+
+
+
 <a name="immudb.schema.SQLQueryRequest"></a>
 
 ### SQLQueryRequest
@@ -1534,7 +1659,8 @@ Only succeed if given key was not modified after given transaction
 | ----- | ---- | ----- | ----------- |
 | sql | [string](#string) |  | SQL query |
 | params | [NamedParam](#immudb.schema.NamedParam) | repeated | Named query parameters |
-| reuseSnapshot | [bool](#bool) |  | If true, reuse previously opened snapshot |
+| reuseSnapshot | [bool](#bool) |  | **Deprecated.** If true, reuse previously opened snapshot |
+| acceptStream | [bool](#bool) |  | Wheter the client accepts a streaming response |
 
 
 
@@ -1571,6 +1697,7 @@ Only succeed if given key was not modified after given transaction
 | b | [bool](#bool) |  |  |
 | bs | [bytes](#bytes) |  |  |
 | ts | [int64](#int64) |  |  |
+| f | [double](#double) |  |  |
 
 
 
@@ -1591,7 +1718,7 @@ Only succeed if given key was not modified after given transaction
 | desc | [bool](#bool) |  | If set to true, sort items in descending order |
 | limit | [uint64](#uint64) |  | maximum number of entries to get, if not specified, the default value is used |
 | sinceTx | [uint64](#uint64) |  | If non-zero, only require transactions up to this transaction to be indexed, newer transaction may still be pending |
-| noWait | [bool](#bool) |  | If set to true, do not wait for indexing to be done before finishing this call |
+| noWait | [bool](#bool) |  | Deprecated: If set to true, do not wait for indexing to be done before finishing this call |
 | inclusiveSeek | [bool](#bool) |  | If set to true, results will include seekKey |
 | inclusiveEnd | [bool](#bool) |  | If set to true, results will include endKey if needed |
 | offset | [uint64](#uint64) |  | Specify the initial entry to be returned by excluding the initial set of entries |
@@ -1635,6 +1762,10 @@ ServerInfoResponse contains information about the server instance.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | version | [string](#string) |  | The version of the server instance. |
+| startedAt | [int64](#int64) |  | Unix timestamp (seconds) indicating when the server process has been started. |
+| numTransactions | [int64](#int64) |  | Total number of transactions across all databases. |
+| numDatabases | [int32](#int32) |  | Total number of databases present. |
+| databasesDiskSize | [int64](#int64) |  | Total disk size used by all databases. |
 
 
 
@@ -1699,6 +1830,53 @@ ServerInfoResponse contains information about the server instance.
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | tableName | [string](#string) |  | Table name |
+
+
+
+
+
+
+<a name="immudb.schema.TruncateDatabaseRequest"></a>
+
+### TruncateDatabaseRequest
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| database | [string](#string) |  | Database name |
+| retentionPeriod | [int64](#int64) |  | Retention Period of data |
+
+
+
+
+
+
+<a name="immudb.schema.TruncateDatabaseResponse"></a>
+
+### TruncateDatabaseResponse
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| database | [string](#string) |  | Database name |
+
+
+
+
+
+
+<a name="immudb.schema.TruncationNullableSettings"></a>
+
+### TruncationNullableSettings
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| retentionPeriod | [NullableMilliseconds](#immudb.schema.NullableMilliseconds) |  | Retention Period for data in the database |
+| truncationFrequency | [NullableMilliseconds](#immudb.schema.NullableMilliseconds) |  | Truncation Frequency for the database |
 
 
 
@@ -1786,6 +1964,12 @@ ServerInfoResponse contains information about the server instance.
 TxMetadata contains metadata set to whole transaction
 
 
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| truncatedTxID | [uint64](#uint64) |  | Entry expiration information |
+| extra | [bytes](#bytes) |  | Extra data |
+
+
 
 
 
@@ -1801,7 +1985,7 @@ TxMetadata contains metadata set to whole transaction
 | tx | [uint64](#uint64) |  | Transaction id to query for |
 | entriesSpec | [EntriesSpec](#immudb.schema.EntriesSpec) |  | Specification for parsing entries, if empty, entries are returned in raw form |
 | sinceTx | [uint64](#uint64) |  | If &gt; 0, do not wait for the indexer to index all entries, only require entries up to sinceTx to be indexed, will affect resolving references |
-| noWait | [bool](#bool) |  | If set to true, do not wait for the indexer to be up to date |
+| noWait | [bool](#bool) |  | Deprecated: If set to true, do not wait for the indexer to be up to date |
 | keepReferencesUnresolved | [bool](#bool) |  | If set to true, do not resolve references (avoid looking up final values if not needed) |
 
 
@@ -1822,7 +2006,7 @@ TxMetadata contains metadata set to whole transaction
 | desc | [bool](#bool) |  | If set to true, scan transactions in descending order |
 | entriesSpec | [EntriesSpec](#immudb.schema.EntriesSpec) |  | Specification of how to parse entries |
 | sinceTx | [uint64](#uint64) |  | If &gt; 0, do not wait for the indexer to index all entries, only require entries up to sinceTx to be indexed, will affect resolving references |
-| noWait | [bool](#bool) |  | If set to true, do not wait for the indexer to be up to date |
+| noWait | [bool](#bool) |  | Deprecated: If set to true, do not wait for the indexer to be up to date |
 
 
 
@@ -1935,6 +2119,7 @@ Reserved to reply with more advanced response later
 | createdby | [string](#string) |  | Name of the creator user |
 | createdat | [string](#string) |  | Time when the user was created |
 | active | [bool](#bool) |  | Flag indicating whether the user is active or not |
+| sqlPrivileges | [SQLPrivilege](#immudb.schema.SQLPrivilege) | repeated | List of SQL privileges |
 
 
 
@@ -2038,6 +2223,7 @@ Reserved to reply with more advanced response later
 | ColIdsByName | [VerifiableSQLEntry.ColIdsByNameEntry](#immudb.schema.VerifiableSQLEntry.ColIdsByNameEntry) | repeated | Mapping of column names to their IDS |
 | ColTypesById | [VerifiableSQLEntry.ColTypesByIdEntry](#immudb.schema.VerifiableSQLEntry.ColTypesByIdEntry) | repeated | Mapping of column IDs to their types |
 | ColLenById | [VerifiableSQLEntry.ColLenByIdEntry](#immudb.schema.VerifiableSQLEntry.ColLenByIdEntry) | repeated | Mapping of column IDs to their length constraints |
+| MaxColId | [uint32](#uint32) |  | Variable is used to assign unique ids to new columns as they are created |
 
 
 
@@ -2169,8 +2355,25 @@ Reserved to reply with more advanced response later
 | proveSinceTx | [uint64](#uint64) |  | When generating the proof, generate consistency proof with state from this transaction |
 | entriesSpec | [EntriesSpec](#immudb.schema.EntriesSpec) |  | Specification of how to parse entries |
 | sinceTx | [uint64](#uint64) |  | If &gt; 0, do not wait for the indexer to index all entries, only require entries up to sinceTx to be indexed, will affect resolving references |
-| noWait | [bool](#bool) |  | If set to true, do not wait for the indexer to be up to date |
+| noWait | [bool](#bool) |  | Deprecated: If set to true, do not wait for the indexer to be up to date |
 | keepReferencesUnresolved | [bool](#bool) |  | If set to true, do not resolve references (avoid looking up final values if not needed) |
+
+
+
+
+
+
+<a name="immudb.schema.VerifiableTxV2"></a>
+
+### VerifiableTxV2
+
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| tx | [Tx](#immudb.schema.Tx) |  | Transaction to verify |
+| dualProof | [DualProofV2](#immudb.schema.DualProofV2) |  | Proof for the transaction |
+| signature | [Signature](#immudb.schema.Signature) |  | Signature for the new state value |
 
 
 
@@ -2265,7 +2468,7 @@ Reserved to reply with more advanced response later
 | minScore | [Score](#immudb.schema.Score) |  | Minimum score of entries to scan |
 | maxScore | [Score](#immudb.schema.Score) |  | Maximum score of entries to scan |
 | sinceTx | [uint64](#uint64) |  | If &gt; 0, do not wait for the indexer to index all entries, only require entries up to sinceTx to be indexed |
-| noWait | [bool](#bool) |  | If set to true, do not wait for the indexer to be up to date |
+| noWait | [bool](#bool) |  | Deprecated: If set to true, do not wait for the indexer to be up to date |
 | offset | [uint64](#uint64) |  | Specify the index of initial entry to be returned by excluding the initial set of entries (alternative to seekXXX attributes) |
 
 
@@ -2329,6 +2532,7 @@ immudb gRPC &amp; REST service
 | CreateUser | [CreateUserRequest](#immudb.schema.CreateUserRequest) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
 | ChangePassword | [ChangePasswordRequest](#immudb.schema.ChangePasswordRequest) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
 | ChangePermission | [ChangePermissionRequest](#immudb.schema.ChangePermissionRequest) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
+| ChangeSQLPrivileges | [ChangeSQLPrivilegesRequest](#immudb.schema.ChangeSQLPrivilegesRequest) | [ChangeSQLPrivilegesResponse](#immudb.schema.ChangeSQLPrivilegesResponse) |  |
 | SetActiveUser | [SetActiveUserRequest](#immudb.schema.SetActiveUserRequest) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
 | UpdateAuthConfig | [AuthConfig](#immudb.schema.AuthConfig) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
 | UpdateMTLSConfig | [MTLSConfig](#immudb.schema.MTLSConfig) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
@@ -2339,7 +2543,7 @@ immudb gRPC &amp; REST service
 | Commit | [.google.protobuf.Empty](#google.protobuf.Empty) | [CommittedSQLTx](#immudb.schema.CommittedSQLTx) |  |
 | Rollback | [.google.protobuf.Empty](#google.protobuf.Empty) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
 | TxSQLExec | [SQLExecRequest](#immudb.schema.SQLExecRequest) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
-| TxSQLQuery | [SQLQueryRequest](#immudb.schema.SQLQueryRequest) | [SQLQueryResult](#immudb.schema.SQLQueryResult) |  |
+| TxSQLQuery | [SQLQueryRequest](#immudb.schema.SQLQueryRequest) | [SQLQueryResult](#immudb.schema.SQLQueryResult) stream |  |
 | Login | [LoginRequest](#immudb.schema.LoginRequest) | [LoginResponse](#immudb.schema.LoginResponse) |  |
 | Logout | [.google.protobuf.Empty](#google.protobuf.Empty) | [.google.protobuf.Empty](#google.protobuf.Empty) |  |
 | Set | [SetRequest](#immudb.schema.SetRequest) | [TxHeader](#immudb.schema.TxHeader) |  |
@@ -2390,11 +2594,14 @@ immudb gRPC &amp; REST service
 | streamExecAll | [Chunk](#immudb.schema.Chunk) stream | [TxHeader](#immudb.schema.TxHeader) |  |
 | exportTx | [ExportTxRequest](#immudb.schema.ExportTxRequest) | [Chunk](#immudb.schema.Chunk) stream | Replication |
 | replicateTx | [Chunk](#immudb.schema.Chunk) stream | [TxHeader](#immudb.schema.TxHeader) |  |
+| streamExportTx | [ExportTxRequest](#immudb.schema.ExportTxRequest) stream | [Chunk](#immudb.schema.Chunk) stream |  |
 | SQLExec | [SQLExecRequest](#immudb.schema.SQLExecRequest) | [SQLExecResult](#immudb.schema.SQLExecResult) |  |
-| SQLQuery | [SQLQueryRequest](#immudb.schema.SQLQueryRequest) | [SQLQueryResult](#immudb.schema.SQLQueryResult) |  |
+| UnarySQLQuery | [SQLQueryRequest](#immudb.schema.SQLQueryRequest) | [SQLQueryResult](#immudb.schema.SQLQueryResult) | For backward compatibility with the grpc-gateway API |
+| SQLQuery | [SQLQueryRequest](#immudb.schema.SQLQueryRequest) | [SQLQueryResult](#immudb.schema.SQLQueryResult) stream |  |
 | ListTables | [.google.protobuf.Empty](#google.protobuf.Empty) | [SQLQueryResult](#immudb.schema.SQLQueryResult) |  |
 | DescribeTable | [Table](#immudb.schema.Table) | [SQLQueryResult](#immudb.schema.SQLQueryResult) |  |
 | VerifiableSQLGet | [VerifiableSQLGetRequest](#immudb.schema.VerifiableSQLGetRequest) | [VerifiableSQLEntry](#immudb.schema.VerifiableSQLEntry) |  |
+| TruncateDatabase | [TruncateDatabaseRequest](#immudb.schema.TruncateDatabaseRequest) | [TruncateDatabaseResponse](#immudb.schema.TruncateDatabaseResponse) |  |
 
  
 

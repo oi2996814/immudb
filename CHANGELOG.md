@@ -4,6 +4,814 @@ All notable changes to this project will be documented in this file. This projec
 ## [Unreleased]
 
 
+<a name="v1.9.5"></a>
+## [v1.9.5] - 2024-09-16
+### Bug Fixes
+- time.Since should not be used in defer statement
+- **pkg/dabase:** return error when attempting to access deleted database
+- **pkg/pgsql/server:** close row readers to release resources
+- **pkg/server:** run metrics server under HTTPS
+
+### Changes
+- **embedded/logging:** improve file base logging.
+- **embedded/sql:** improvements on SQL layer.
+- **embedded/store:** improve index flush logic
+- **pkg/database:** implement database manager
+- **pkg/server:** implement automatic generation of self-signed HTTPS certificate
+
+
+<a name="v1.9.4"></a>
+## [v1.9.4] - 2024-07-25
+### Bug Fixes
+- set mattermost payload
+
+
+<a name="v1.9.3"></a>
+## [v1.9.3] - 2024-05-23
+### Changes
+- fix some comments
+- refactor image building
+- The GitHub workflow push.yml was updated to use the repository owner's Docker images instead of fixed ones. This change allows for more flexibility and control when using Docker images, and ensures that the correct images are used based on the repository owner.
+- Update GitHub Actions to use checkout[@v4](https://github.com/v4)
+- Add support to ARM64
+- **embedded/cache:** replace sync.Mutex with sync.RWMutex
+- **embedded/cache:** validate input params before obtaining mutex lock
+
+### Reverts
+- test with github token
+- chore(embedded/cache): replace sync.Mutex with sync.RWMutex
+
+
+<a name="v1.9DOM.2"></a>
+## [v1.9DOM.2] - 2023-12-29
+### Bug Fixes
+- apply fix for CVE-2023-44487
+- performance test regression
+
+### Changes
+- **deps:** bump actions/setup-go from 3 to 5
+- **deps:** bump actions/upload-artifact from 3 to 4
+- **deps:** bump actions/download-artifact from 3 to 4
+- **deps:** bump google.golang.org/grpc in /test/e2e/truncation
+- **deps:** bump google.golang.org/protobuf from 1.31.0 to 1.32.0
+
+
+<a name="v1.9DOM.2-RC1"></a>
+## [v1.9DOM.2-RC1] - 2023-12-21
+### Bug Fixes
+- performance test regression
+- remove influxdb dependencies
+- correct the test after the merge and latest refactor
+- source /etc/sysconfig/immudb on AWS EC2 startup
+
+### Changes
+- add influxdb (needed for performance test) dependency
+- use goveralls token variable
+- **deps:** bump golang.org/x/crypto in /test/columns
+- **deps:** bump golang.org/x/crypto in /tools/mkdb
+- **deps:** bump golang.org/x/crypto
+- **deps:** bump golang.org/x/crypto in /test/e2e/truncation
+- **deps:** bump golang.org/x/crypto
+- **deps:** bump github.com/rogpeppe/go-internal from 1.9.0 to 1.12.0
+- **deps:** bump golang.org/x/net from 0.17.0 to 0.19.0
+- **deps:** bump golang.org/x/crypto from 0.14.0 to 0.17.0
+
+### Features
+- add s3 (aws) role based auth as an option
+- automatically convert uuid strings and byte slices to uuid values
+
+### Reverts
+- Merge remote-tracking branch 'origin/dependabot/go_modules/github.com/rogpeppe/go-internal-1.12.0' into release/v1.9.2
+
+
+<a name="v1.9DOM.1"></a>
+## [v1.9DOM.1] - 2023-11-16
+### Changes
+- **pkg/pgsql:** handle odbc help
+- **pkg/server:** change permission automatically revokes existing ones
+
+
+<a name="v1.9DOM.1-RC1"></a>
+## [v1.9DOM.1-RC1] - 2023-11-14
+### Bug Fixes
+- lower databasename in OpenSession
+- **embedded/sql:** fix data-race when mapping keys
+- **embedded/sql:** fix data-race when mapping keys
+- **embedded/store:** handle key mapping in ongoing txs
+- **embedded/store:** handle key mapping in ongoing txs
+- **embedded/store:** handle key mapping in ongoing txs
+- **pkg/database:** ensure proper tx validation
+- **pkg/server:** user creation with multidbs
+
+### Changes
+- docker image with swagger ui (for AWS Marketplace)
+- **cmd/immudb:** upgrade to new pgsql changes
+- **deps:** bump github.com/google/uuid from 1.3.1 to 1.4.0
+- **embedded/sql:** user pwd
+- **embedded/sql:** show users stmt
+- **embedded/sql:** wip emulate pg_type system table
+- **embedded/sql:** continue to support databases and tables datasources
+- **embedded/store:** indexer source and target prefixes
+- **pkg/client:** possibility to retrieve session id
+- **pkg/pgsql:** decouple error from ready to query messages
+- **pkg/pgsql:** uuid and float types conversion
+- **pkg/pgsql:** comment describing pgsql wire protocol constraints
+- **pkg/pgsql:** support multiple-statements in simple-query mode
+- **pkg/pgsql:** protocol enhancements
+- **pkg/pgsql:** handle deallocate prepared stmt
+- **pkg/pgsql:** tls support
+- **pkg/pgsql:** single command complete message
+- **pkg/pgsql:** transactional query machine
+- **pkg/pgsql:** pgsql write protocol improvements
+- **pkg/pgsql:** proper handling of queries with empty resultsets
+- **pkg/pgsql:** show table/s
+- **pkg/server:** upgrade to transactional pgsql server
+- **pkg/server:** set dynamic immudb server port in pgsql server
+- **pkg/server:** pgsql server creation only when enabled
+- **pkg/server:** list users from multidb handler
+- **pkg/server:** require proper permissions at multidb handler
+
+### Features
+- **embedded/sql:** show table stmt
+- **embedded/sql:** wip user mgmt
+- **embedded/sql:** show users stmt
+- **embedded/sql:** show databases/tables stmt
+- **pkg/server:** add support of underscore in db name Signed-off-by: Martin Jirku <martin[@jirku](https://github.com/jirku).sk>
+
+
+<a name="v1.9DOM.0"></a>
+## [v1.9DOM.0] - 2023-10-19
+### Changes
+- docker image with swagger ui
+- docker image with swagger ui
+
+
+<a name="v1.9DOM"></a>
+## [v1.9DOM] - 2023-10-19
+### Changes
+- **cmd/immuadmin:** add indexing related flags
+
+### Features
+- **embedded/sql:** table renaming
+
+
+<a name="v1.9.0-RC2"></a>
+## [v1.9.0-RC2] - 2023-10-16
+### Bug Fixes
+- standard syntax for drop index
+- **embedded/sql:** fix sql temporal range evaluation
+
+### Changes
+- **embedded/document:** count with limit in subquery
+- **embedded/sql:** expose subquery creation
+- **pkg/api:** set optional parameters
+- **pkg/api:** set optional parameters
+
+
+<a name="v1.9.0-RC1"></a>
+## [v1.9.0-RC1] - 2023-10-11
+### Bug Fixes
+- correct immudb name in readme
+- allow the local id to be used if present even if remote flag is on
+- apply fixes discussed in PR
+- insertion ts for key-values should not be equal to the current root ts
+- **Makefile:** remove webconsole tag from immuclient/immuadmin builds
+- **embedded/appendable:** explicit freebsd build clauses
+- **embedded/document:** ensure multi-indexing is enabled
+- **embedded/document:** avoid waiting for tx to be committed
+- **embedded/sql:** advance position when decoding value at deleted column
+- **embedded/store:** use correct index path
+- **embedded/store:** handle transient key update
+- **embedded/store:** read lock when fetching indexer
+- **embedded/store:** precommitted transaction discarding recedes durable state
+- **embedded/store:** read lock when pausing indexers
+- **embedded/tbtree:** snapshot validation
+- **embedded/tbtree:** consider offset for history count calculation
+- **embedded/tbtree:** proper _rev calculation
+- **pkg/server:** buffer reuse
+
+### Changes
+- build with swaggerui
+- unnecessary use of fmt.Sprintf
+- use copy instead of a loop
+- align covered packages when pulling and merging
+- unnecessary use of fmt.Sprintf
+- **cmd/immuclient:** display raw column selector in table header
+- **deps:** bump golang.org/x/net from 0.10.0 to 0.12.0
+- **deps:** bump golang.org/x/crypto from 0.10.0 to 0.11.0
+- **deps:** bump golang.org/x/crypto from 0.13.0 to 0.14.0
+- **deps:** bump golang.org/x/crypto from 0.12.0 to 0.13.0
+- **deps:** bump golang.org/x/sys from 0.9.0 to 0.10.0
+- **deps:** bump golang.org/x/net from 0.14.0 to 0.15.0
+- **deps:** bump google.golang.org/grpc
+- **deps:** bump golang.org/x/sys from 0.11.0 to 0.12.0
+- **deps:** bump google.golang.org/grpc in /test/e2e/truncation
+- **deps:** bump google.golang.org/grpc
+- **deps:** bump golang.org/x/net from 0.15.0 to 0.17.0
+- **deps:** bump github.com/grpc-ecosystem/grpc-gateway/v2
+- **deps:** bump securego/gosec from 2.15.0 to 2.17.0
+- **deps:** bump golang.org/x/sys from 0.10.0 to 0.11.0
+- **deps:** bump golang.org/x/crypto from 0.7.0 to 0.10.0
+- **deps:** bump golang.org/x/net from 0.12.0 to 0.13.0
+- **deps:** bump google.golang.org/grpc from 1.55.0 to 1.56.2
+- **deps:** bump golang.org/x/net from 0.13.0 to 0.14.0
+- **embedded/document:** register username when applying a change
+- **embedded/document:** enable multi-indexing in doc engine tests
+- **embedded/document:** encoded document using valRef
+- **embedded/document:** attach username when auditing document
+- **embedded/sql:** post-commit physical index deletion
+- **embedded/sql:** uuid decoding
+- **embedded/sql:** improve internal index naming
+- **embedded/sql:** use declared constant for fixed ids
+- **embedded/sql:** insertion benchmark
+- **embedded/sql:** historical queries over primary index
+- **embedded/sql:** dynamic indexing
+- **embedded/sql:** deletion of primary index path
+- **embedded/sql:** multi-snapshop mvvc
+- **embedded/sql:** temporal queries with multi-indexing
+- **embedded/sql:** transactional drops
+- **embedded/sql:** unique index creation supported on empty tables
+- **embedded/sql:** support parenthesis as datatype constraint delimiter
+- **embedded/store:** multi-indexing
+- **embedded/store:** ensure index is erased from disk
+- **embedded/store:** wip multi-indexing
+- **embedded/store:** history returning value refs
+- **embedded/store:** indexer alloc its tx
+- **embedded/store:** remove metastate
+- **embedded/store:** history with rev count
+- **embedded/store:** injective index mapper
+- **embedded/store:** ensure snapshot up to date
+- **embedded/store:** indexing callbacks
+- **embedded/store:** key reader including historical entries
+- **embedded/store:** indexing prefix
+- **embedded/store:** entry mapper
+- **embedded/tbtree:** value-preserving history
+- **embedded/tbtree:** hcount serialization
+- **embedded/tbtree:** fetching historical values
+- **embedded/tbtree:** wip value-preserving history
+- **embedded/tbtree:** value-preserving history
+- **embedded/tbtree:** context propagation
+- **pkg/api:** adjust doc serializations to match verification
+- **pkg/api:** endpoint improvements
+- **pkg/client:** add setAll to immuclient mock
+- **pkg/client:** use buf for msg exchange
+- **pkg/database:** context propagation
+- **pkg/database:** context propagation
+- **pkg/database:** fix remote storage paths
+- **pkg/database:** increase delay when tx is not present
+- **pkg/database:** keept reading from specific tx
+- **pkg/database:** multi-indexing database
+- **pkg/database:** doc audit without retrieving payloads
+- **pkg/database:** register username when applying a change
+- **pkg/database:** fix remote storage paths
+- **pkg/database:** mandatory wait with async replication
+- **pkg/database:** kv count
+- **pkg/server:** register username when applying a change in doc apis
+- **pkg/server:** minor code adjustment
+- **pkg/stdlib:** non transactional ddl stmts
+- **pkg/truncator:** use embedded/logger package
+- **pkg/verification:** minor doc verification improvements
+- **swagger:** use embedded logger package
+- **tests:** Tests cleanup
+
+### Code Refactoring
+- **pkg/logger:** move logger from pkg to embedded
+
+### Features
+- update readme
+- prevent identifier from creation when use external id option
+- pass logger to heartbeater
+- add flag for using external id as a main one
+- **embedded/document:** register user when creating collection
+- **embedded/document:** doc audit without retrieving payloads
+- **embedded/document:** remove field from collection
+- **embedded/document:** add field to collection
+- **embedded/sql:** async multi-indexing
+- **embedded/sql:** extra metadata when creating tx
+- **embedded/sql:** include _rev column in historical queries
+- **embedded/sql:** drop index and table stmts
+- **embedded/sql:** table history
+- **embedded/sql:** query including historical rows
+- **embedded/sql:** dynamic multi-indexing
+- **embedded/sql:** wip uuid datatype support
+- **embedded/sql:** drop column stmt
+- **embedded/store:** use index attribute in kv metadata
+- **embedded/store:** getBetween
+- **embedded/store:** extra tx metadata
+- **embedded/store:** transactionaless multi-indexing
+- **embedded/tbtree:** getBetween
+- **embedded/tbtree:** key reader supporting historical values
+- **pkg/api:** docAudit returning timestamp and possibility to omit payloads
+- **pkg/api:** re-enable swagger ui
+- **pkg/api:** include username in document audit response
+- **pkg/api:** add field and remove field endpoints
+- **pkg/database:** add user when creating collection
+- **pkg/server:** add user when creating collection
+
+### Reverts
+- chore: remove initial swagger support
+
+
+<a name="v1.5.0"></a>
+## [v1.5.0] - 2023-06-20
+### Bug Fixes
+- **embedded/store:** handle replication of empty values
+
+### Changes
+- **embedded/document:** naming validations
+- **embedded/document:** allow hyphen in doc naming
+- **embedded/document:** collection and field naming validations
+- **embedded/store:** embedded values and prealloc disabled by default
+
+
+<a name="v1.5.0-RC1"></a>
+## [v1.5.0-RC1] - 2023-06-16
+### Bug Fixes
+- build/Dockerfile.immuadmin to reduce vulnerabilities
+- build/Dockerfile.immuclient to reduce vulnerabilities
+- build/Dockerfile.immuadmin to reduce vulnerabilities
+- build/Dockerfile.rndpass to reduce vulnerabilities
+- build/Dockerfile.full to reduce vulnerabilities
+- modify tests for new object db initialisation
+- build/Dockerfile.full to reduce vulnerabilities
+- build/Dockerfile.rndpass to reduce vulnerabilities
+- table id generation
+- build/Dockerfile.immuclient to reduce vulnerabilities
+- **docs:** bump golang.org/x/net to 0.7.0 in docs and test pkg
+- **embedded/ahtree:** correct calculation of payload offset
+- **embedded/appendable:** proper closing of non-required chunks
+- **embedded/document:** support nil docs
+- **embedded/document:** proper column renaming
+- **embedded/document:** assign correct revision number
+- **embedded/document:** close readers before updating document
+- **embedded/document:** id field conversion
+- **embedded/document:** proper handling of deleted documents
+- **embedded/document:** validate doc is properly initialized
+- **embedded/document:** validate doc is properly initialized
+- **embedded/sql:** do not force columns to have max key length when unspecified
+- **embedded/sql:** include explicit close into sqlTx options
+- **embedded/sql:** multi-row conflict handling
+- **embedded/sql:** implicit conversion within expressions
+- **embedded/sql:** consider 0 as no limit
+- **embedded/sql:** parsing of exists stmt
+- **embedded/sql:** like operator supporting null values
+- **embedded/sql:** crash when RowReader.Read() returns error
+- **embedded/sql:** proper handling of parameters in row readers
+- **embedded/store:** force snapshot to include mandatory mvcc changes
+- **embedded/store:** ensure snapshot is closed for read-only txs
+- **embedded/store:** integrity checks covering empty values
+- **embedded/store:** avoid dead-lock when exporting tx with external commit allowance mode
+- **embedded/tbtree:** fix error comparison
+- **embedded/tbtree:** rollback to the most recent snapshot when insertion fails
+- **embedded/tbtree:** fix snapshot getKeyWithPrefix
+- **embedded/tbtree:** proper kv validation
+- **embedded/tbtree:** fix snapshot getKeyWithPrefix
+- **go.mod:** bump go version to 1.17 in go.mod
+- **helm:** set securityContext and podSecurityContext at correct location
+- **pkg/api:** create collection endpoint with path parameter
+- **pkg/api:** fix and implement LIKE and NOT_LIKE operator when querying documents
+- **pkg/client:** ensure ticker is properly stopped
+- **pkg/client:** return error when verifiedGet operation fails
+- **pkg/database:** read-only document API for replicas
+- **pkg/database:** skip eof error during scan
+- **pkg/database:** read from err channel
+- **pkg/database:** wrap propagated context
+- **pkg/database:** fix truncation and contemplate entry-less txs
+- **pkg/replicator:** check stream is properly initialized
+- **pkg/server:** do not set trailer metadata when replication is done with bidirectional streamming
+- **pkg/server:** ensure error propagation when sending headers
+- **pkg/server:** use grpc interceptors with grpc proxy
+- **pkg/server:** request explicit close when creating a rw sql tx
+- **pkg/server:** ensure tx is closed upon error
+- **pkg/server:** close document readers before cancelling txs
+- **pkg/server:** thread-safe doc reader during session handling
+- **pkg/stream:** handle the case when message fits in a single chunk
+- **pkg/truncator:** adjust plan logic and contemplate empty txs
+- **pkg/verification:** document comparison with proto equals
+- **push.yml:** update min go version
+
+### Changes
+- Add reformatting of protobuf file on build/codegen
+- rename DocumentBulkInsert to DocumentInsertMany
+- Update build/RELEASING.md file
+- allow multiple order by clauses
+- replace schemav2 with protomodel in truncator test
+- handle no more doc error inside response in search
+- use sys/unix package
+- remove docker test provider
+- update document with id if not nil
+- use gosec action
+- add updatecollection api
+- copy document catalogue when truncating db
+- add DocumentFindOneAndUpdate api
+- wait for immudb to get initialized
+- add test case for uncommitted tx not increasing table count
+- pass transaction to upsert function
+- check invalid search id in search request
+- add monotically increasing number to doc id generation
+- add document audit api
+- change DocumentFindOneAndUpdate to DocumentUpdate
+- return sql reader on document search
+- add order by clause in search
+- use sql statement for delete than raw query
+- add ReadN method to document reader
+- add documentReader iterator to read documents
+- remove initial swagger support
+- exclude generated code from coverage
+- exclude generated code from coverage
+- add unique search id for paginated readers
+- fix TestFloatSupport test case
+- simplified codegen
+- fix tests
+- change DeleteTableStmt to DropTableStmt
+- generate proto requests for DocumentDelete api
+- return ErrNoMoreDocuments instead of sql.ErrNoMoreRows
+- add DocumentDelete api
+- add default size for document reader lru cache
+- add lru cache for paginated readers
+- fix merge issues
+- add pagination support when fetching documents
+- fix failing verification test
+- increase test coverage for document engine
+- add bulk insert api
+- TruncateDatabase endpoint should use the same ongoing Truncator if present
+- address review comment
+- add go-acc and goveralls to ext-tools folder
+- delete columns on table deletion
+- check for column before adding index on collection update
+- add option for non unique indexes on collection
+- **ci:** improve notifications
+- **cmd/immuadmin:** flag to specify the usage of embedded values
+- **cmd/immuadmin:** add truncate cmd to immuadmin
+- **cmd/immuadmin:** modify truncation settings schema
+- **deps:** bump golang.org/x/crypto
+- **deps:** bump github.com/jaswdr/faker from 1.4.3 to 1.16.0
+- **deps:** bump securego/gosec from 2.14.0 to 2.15.0
+- **deps:** bump github.com/codenotary/immudb
+- **deps:** bump github.com/influxdata/influxdb-client-go/v2
+- **deps:** bump github.com/golang/protobuf from 1.5.2 to 1.5.3
+- **deps:** bump github.com/rogpeppe/go-internal from 1.8.0 to 1.9.0
+- **deps:** bump github.com/lib/pq from 1.10.7 to 1.10.9
+- **deps:** bump github.com/lib/pq from 1.10.2 to 1.10.7
+- **deps:** bump golang.org/x/net from 0.8.0 to 0.9.0
+- **deps:** bump github.com/rs/xid from 1.3.0 to 1.5.0
+- **deps:** bump github.com/stretchr/testify from 1.8.0 to 1.8.2
+- **deps:** bump aws-actions/configure-aws-credentials from 1 to 2
+- **deps:** bump github.com/spf13/cobra from 1.2.1 to 1.6.1
+- **deps:** bump github.com/grpc-ecosystem/grpc-gateway/v2
+- **deps:** bump google.golang.org/grpc from 1.46.2 to 1.54.0
+- **deps:** bump github.com/spf13/viper from 1.12.0 to 1.15.0
+- **embedded/ahtree:** add inline comments
+- **embedded/appendable:** fsync freebsd
+- **embedded/appendable:** automatic file creation only when appending
+- **embedded/appendable:** use fdatasync when file is preallocated
+- **embedded/appendable:** file syncing per os
+- **embedded/appendable:** support file preallocation
+- **embedded/appendable:** file syncing using fdatasync when available
+- **embedded/appendable:** minor improvements reading files
+- **embedded/appendable:** metadats with putBool
+- **embedded/document:** remove dead-code
+- **embedded/document:** add float support for doc engine
+- **embedded/document:** raw document validation
+- **embedded/document:** improve error handling
+- **embedded/document:** transactional collection update
+- **embedded/document:** support null values in indexed attributes
+- **embedded/document:** retrieval of raw document
+- **embedded/document:** move source code into dedicated files
+- **embedded/document:** use onclose callback to close the tx
+- **embedded/document:** return struct when auditing document history
+- **embedded/document:** add test to ensure key ordering in document during serialization
+- **embedded/document:** blob type not yet supported
+- **embedded/document:** catch key alredy exists  error
+- **embedded/document:** catch tx read conflict error
+- **embedded/document:** translate table already exists error
+- **embedded/document:** minor var renaming
+- **embedded/document:** fix query stmt generator and add tests
+- **embedded/document:** leverage sqlengine lazy index contraint evaluation
+- **embedded/document:** binary serialization of doc payload
+- **embedded/document:** use query limit when searching
+- **embedded/document:** wip continue with improvements
+- **embedded/document:** wip continue with improvements
+- **embedded/document:** wip continue with improvements
+- **embedded/document:** wip improvements
+- **embedded/document:** add collection deletion api support
+- **embedded/document:** minor code simplification
+- **embedded/document:** add variable length support for multiple types
+- **embedded/document:** ensure order by clauses are used when deleting and updating
+- **embedded/document:** improve error messages
+- **embedded/document:** minor code adjustments
+- **embedded/document:** transactional collection and document creation
+- **embedded/document:** improve error messages
+- **embedded/document:** possibility to specify desc order when querying document history
+- **embedded/document:** add tests for blob type
+- **embedded/document:** avoid public dependency on sql
+- **embedded/document:** add test cases for collection on doc engine
+- **embedded/document:** change querier from BinBoolExp to CmpBoolExp
+- **embedded/document:** transactional document creation
+- **embedded/document:** add document id generation
+- **embedded/document:** typo in error message
+- **embedded/htree:** allow creation of empty hash trees
+- **embedded/object:** add document abstraction
+- **embedded/object:** add collection/database statements
+- **embedded/sql:** use read-only txs whenever possible
+- **embedded/sql:** make sql engine generic for object store
+- **embedded/sql:** limit and offset boundary validation
+- **embedded/sql:** minor numeric type adjustments
+- **embedded/sql:** implicit conversion support in limit and offset clauses
+- **embedded/sql:** simplified sql tx
+- **embedded/sql:** return closed sql txs
+- **embedded/sql:** implicit conversion from varchar to int and float types
+- **embedded/sql:** upgraded row reader
+- **embedded/sql:** ddl stmts register catalog mutation
+- **embedded/sql:** snapshot reuse improvements
+- **embedded/sql:** lazy index contraint validation
+- **embedded/sql:** WIP singledb sql engine
+- **embedded/sql:** transient context
+- **embedded/sql:** validate total key length at index creation time
+- **embedded/sql:** extend max key length to 512
+- **embedded/sql:** cancellable row reader
+- **embedded/store:** add in-line documentation for store options
+- **embedded/store:** validate Eh only when integrity checks are not disabled
+- **embedded/store:** addition of a cache for values
+- **embedded/store:** consume all tx content even if integrity checks are disabled
+- **embedded/store:** optional integrity checking when reading values
+- **embedded/store:** validate Eh only when integrity checks are not disabled
+- **embedded/store:** inline comments
+- **embedded/store:** fix typo in inline comment
+- **embedded/store:** validate gets using filters
+- **embedded/store:** MVCC read-set with boundaries
+- **embedded/store:** context propagation
+- **embedded/store:** mvcc validation only if another tx was processed
+- **embedded/store:** minor changes after rebasing from master
+- **embedded/store:** simplified dualproof implementation
+- **embedded/store:** skipIntegrityCheck parameter when reading data
+- **embedded/store:** minor code improvement
+- **embedded/store:** add min limit for truncation frequency
+- **embedded/store:** use syncSnapshot to validate ongoing txs
+- **embedded/store:** unify Read and ReadBetween
+- **embedded/store:** transient context
+- **embedded/store:** tx header is returned when fully committed
+- **embedded/store:** api upgrade
+- **embedded/store:** set ctx as first argument
+- **embedded/store:** readValueAt and exportTx improvements
+- **embedded/store:** update ReadBetween
+- **embedded/store:** contextualized transactions
+- **embedded/store:** inline comments
+- **embedded/store:** snapshot reuse improvements
+- **embedded/store:** set smaller default value for indexing bulk size
+- **embedded/store:** wip mvcc validations
+- **embedded/store:** simplified indexer initialization
+- **embedded/store:** multi-tx unsafe mvcc
+- **embedded/store:** set tx as closed upon cancellation
+- **embedded/store:** wip mvcc validations
+- **embedded/store:** set ctx as first argument
+- **embedded/store:** embedded meta attribute required if version is greater than 1
+- **embedded/store:** set embedded values mode as default one
+- **embedded/store:** backward compatible embedded value mode
+- **embedded/store:** optional integrity checking when reading values
+- **embedded/store:** preallocate tx header log files
+- **embedded/store:** wip mvcc validations
+- **embedded/store:** handle eof when reading last committed tx
+- **embedded/store:** support preallocated files when reading tx data
+- **embedded/store:** wip preallocated clog
+- **embedded/store:** option to prealloc files
+- **embedded/store:** optional integrity checking
+- **embedded/store:** further in-line documentation
+- **embedded/store:** make truncation validation tolerate entryless txs
+- **embedded/store:** allow tx without entries as long as it contains metadata
+- **embedded/store:** add hashValue as fixed 32 byte size
+- **embedded/store:** add test for TxOptions
+- **embedded/store:** add min limit for truncation frequency
+- **embedded/store:** multi-tx bulk indexing
+- **embedded/store:** fix default vlog cache size and add validation for hash when reading from cache
+- **embedded/store:** safe key copy for mvcc validation
+- **embedded/store:** improve log messages when discarding precommitted transactions
+- **embedded/store:** mvcc validations
+- **embedded/store:** fix rebase issue with readValueAt for vlogcache
+- **embedded/store:** multi-timed bulk insertions
+- **embedded/store:** clog file size adjustment only when preallocation is disabled
+- **embedded/store:** added more in-line comments
+- **embedded/store:** file preallocation not enabled by default
+- **embedded/store:** propagate context usage
+- **embedded/tbtree:** parametrize snapshot creation specs
+- **embedded/tbtree:** in-line documentation
+- **embedded/tbtree:** initialize tbtree with a non-mutated leaf
+- **embedded/tbtree:** getWithPrefix
+- **embedded/tbtree:** remove unnecessary kv sorting
+- **embedded/tbtree:** add in-line documentation
+- **embedded/tbtree:** minor code improvements
+- **embedded/tbtree:** rollback not needed as updates are made in a copy
+- **embedded/tbtree:** add in-line comments
+- **embedded/tbtree:** wip reduce allocs while updating inner node
+- **embedded/tbtree:** optimized bulk insertion
+- **embedded/tbtree:** optimize snapshot renewal
+- **embedded/tbtree:** wip optimized insertion
+- **embedded/tbtree:** variable renaming after rebasing
+- **embedded/tools:** upgrade embedded tools with transient context
+- **embedded/watchers:** return context error upon cancellation
+- **embedded/watchers:** set ctx as first arg
+- **embedded/watchers:** use context instead of cancellation channel
+- **package/database:** bunch of fixes and improvements in document engine
+- **pkg:** add more tests admin truncate command
+- **pkg/api:** expose db setting to enable file preallocation
+- **pkg/api:** use ErrrIs/ErrorContains in error checks
+- **pkg/api:** rename idFieldName to documentIdFieldName
+- **pkg/api:** annotate required fields
+- **pkg/api:** use of path parameters for document-related endpoints
+- **pkg/api:** expose new store indexing options
+- **pkg/api:** document update with path parameter
+- **pkg/api:** document api improvements
+- **pkg/api:** remove bool from tx metadata conversion
+- **pkg/api:** document api improvements
+- **pkg/api:** snapshot reuse attributes
+- **pkg/api:** search api improvements
+- **pkg/api:** return txID when inserting or updating documents
+- **pkg/api:** expose MVCC read-set settings
+- **pkg/api:** remove unsupported attribute from response messages
+- **pkg/api:** revert changes in swagger spec
+- **pkg/api:** re-generated httpclient with DeleteDocument endpoint
+- **pkg/api:** singular document path for audit and proof endpoints
+- **pkg/api:** manual adjustments post-code generation
+- **pkg/api:** expose replication settings for skipping integrity checks and indexing
+- **pkg/api:** swagger gen
+- **pkg/api:** value cache settings exposed
+- **pkg/api:** annotate primitive types as required
+- **pkg/api:** endpoint renaming
+- **pkg/api:** cleaner session id header
+- **pkg/api:** minor proof request renaming
+- **pkg/api:** authorization in swagger spec
+- **pkg/api:** re-generated httpclient
+- **pkg/api:** expose support for unsafe mvcc transactions
+- **pkg/api:** expose embeddedValue database setting
+- **pkg/api:** remove generated httpclient
+- **pkg/api:** buch of implementation improvements
+- **pkg/api:** revised document and authentication apis
+- **pkg/api:** annotated required message fields
+- **pkg/api:** add tx metadata conversion
+- **pkg/api:** re-generated httpclient
+- **pkg/api:** change retention period in TruncateDatabase message to int64
+- **pkg/auth:** add document update permissions
+- **pkg/client:** minor renaming in tx options
+- **pkg/client:** move heartbeater.go to pkg/client
+- **pkg/client/cache:** improve test coverage
+- **pkg/database:** upgrade after rebasing
+- **pkg/database:** remove object store db initialisation
+- **pkg/database:** upgraded reader specs
+- **pkg/database:** add document query struct to abstract request query
+- **pkg/database:** change objectEngine to documentEngine
+- **pkg/database:** add mvcc test for truncation, parse retention period using duration
+- **pkg/database:** add more tests for truncation
+- **pkg/database:** add document store db initialisation
+- **pkg/database:** updated APIs with schema updates
+- **pkg/database:** implement GetCollection API
+- **pkg/database:** remove search through first query
+- **pkg/database:** add query parser for object to generate sql expression
+- **pkg/database:** fix truncation deletion point checks in test
+- **pkg/database:** add search document api implementation for object store
+- **pkg/database:** create document/collection from schemav2 requests
+- **pkg/database:** context propagation
+- **pkg/database:** minor document renaming
+- **pkg/database:** add and implement object db interface
+- **pkg/database:** add DocumentUpdate api
+- **pkg/database:** minor code aligments
+- **pkg/database:** add object store
+- **pkg/database:** context propagation from server to embedded layer
+- **pkg/database:** proper calculation of source tx
+- **pkg/database:** create txs with default options
+- **pkg/database:** hard limit on page size
+- **pkg/database:** check encoded value is consistent with raw document
+- **pkg/database:** document verfication
+- **pkg/database:** use _obj to hold raw document payload
+- **pkg/database:** snapshot reuse changes
+- **pkg/database:** add document engine abstraction
+- **pkg/integration:** exportTx benchmarking
+- **pkg/replication:** replicator using bidirectional streaming
+- **pkg/replication:** improve options validation
+- **pkg/replication:** skip integrity check when exporting transactions
+- **pkg/replication:** context propagation
+- **pkg/replication:** wip stream replication - only async replication working
+- **pkg/server:** multi-grpc request context propagation
+- **pkg/server:** added inline comments
+- **pkg/server:** set default replication settings
+- **pkg/server:** context propagation from grpc api to embedded package
+- **pkg/server:** upgrades after rebasing from master
+- **pkg/server:** upgrade to new insecure credentials api
+- **pkg/server:** log error when closing document reader
+- **pkg/server:** support snapshot reuse
+- **pkg/server:** close all paginated readers on close of session
+- **pkg/server:** integrate document functions with server apis
+- **pkg/server:** add pagination test for document search
+- **pkg/server:** ensure document reader is closed when swithing pages
+- **pkg/server:** minor code reuse
+- **pkg/server:** add test successful load/unload of db with truncator
+- **pkg/store:** skipIntegrityChecks parameter when reading data
+- **pkg/stream:** handle eof when sending data
+- **pkg/truncator:** return error if expiration time hasn't been met
+- **pkg/truncator:** add context to Truncate method
+- **pkg/truncator:** refactor truncator process
+- **pkg/verfication:** document verification methods
+- **pkg/verification:** strengthen proof validations
+- **pkg/verification:** minor renaming
+- **pkg/verification:** document verification using embedded identifier
+- **pkg/verification:** use proto serialization
+- **test/objects:** add tests to create collections
+- **test/objects:** use httpexpect
+- **test/objects:** add more tests to create collection
+- **test/perf:** fix version value for flag
+- **test/perf:** add immudb version to influxdb data
+- **test/perf:** add runner to results for influxdb
+- **test/perf-tests:** remove runner check
+- **test/perf-tests:** use proxy on benchmark runner
+- **test/performance:** call cleanup method
+- **test/performance-test-suite:** fix replica directory path
+- **test/performance-test-suite:** add sync benchmarks
+- **test/performance-test-suite:** changed server concrete implementation
+- **test/performance-test-suite:** replicas are able to communicate with primary
+- **test/performance-test-suite:** send results to influxdb
+- **test/performance-test-suite:** extract json from results
+- **test/performance-test-suite:** add influxdb host and toke arguments
+- **test/performance-test-suite:** use temp folders for primary, replicas and clients
+- **truncator:** add more coverage for truncator
+
+### Features
+- add vlog truncation functionality
+- **ci:** change notification
+- **embedded/document:** count documents
+- **embedded/object:** add object store to embedded pkg
+- **embedded/sql:** Initial float support
+- **embedded/sql:** limit and offset as expressions
+- **embedded/sql:** sql transaction creation with options
+- **embedded/sql:** short casting syntax
+- **embedded/sql:** wip unsafe and optimized mvcc
+- **embedded/sql:** implicit type conversion of numeric types
+- **embedded/store:** tx creation with options
+- **embedded/store:** expose GetWithPrefixAndFilters
+- **embedded/store:** embeddable values
+- **embedded/store:** unsafe mvcc mode
+- **embedded/store:** embedded values option
+- **embedded/store:** read-only transactions
+- **embedded/store:** GetWithPrefixAndFilters
+- **embedded/tbtree:** multi-timed bulk insertions
+- **pkg/api:** document proof endpoint
+- **pkg/api:** improved replace documents endpoint
+- **pkg/api:** keepOpen parameter to instruct server to maintain a document reader in memory
+- **pkg/api:** count documents endpoint
+- **pkg/client:** optional tx options are now available during the creation process
+
+
+<a name="v1.4.1"></a>
+## [v1.4.1] - 2022-11-21
+### Changes
+- **pkg/server:** Add logs for activities related to users
+
+
+<a name="v1.4.1-RC1"></a>
+## [v1.4.1-RC1] - 2022-11-16
+### Bug Fixes
+- Change replication-related terms in codebase
+- Change replication-related terms in tests
+- **cmd:** Rename replication flags to follow consistent convention
+- **cmd/immudb:** Better description of the `--force-admin-password` flag
+- **cmd/immudb:** Fix description of the `force-admin-password` flag
+- **embedded/appendable:** fsync parent directory
+- **embedded/appendable:** fsync parent folder in remote appedable
+- **pkg:** Rename replication-related fields in GRPC protocol
+- **pkg/client:** Delay server identity validation
+- **pkg/client/cache:** Add methods to validate server identity
+- **pkg/client/cache:** Validate server's identity
+- **pkg/server:** Remove includeDeactivated flag when querying for users
+- **pkg/server/servertest:** Add uuid to buffconn server
+- **pkg/server/servertest:** Fix resetting grpc connection
+- **test/perf-test-suite:** Avoid dumping immudb logo on perf test results file
+- **test/performance-test-suite:** Ensure results are shown after proper is finished
+- **verification:** Additional Linear proof consistency check
+- **verification:** Recreate linear advance proofs for older servers
+
+### Changes
+- **ci:** migrate deprecating set-output commands
+- **cmd/immudb:** Allow resetting sysadmin password
+- **docs/security:** Be less specific about package version in examples
+- **docs/security:** Add resources for the linear-fake vulnerability
+- **embedded/appendable:** sync directories
+- **embedded/store:** Disable asynchronous AHT generation
+- **embedded/store:** Remove AHT Wait Hub
+- **pkg/client:** Document `WithDisableIdentityCheck` option
+- **pkg/client/cache:** Describe serverIdentity parameter
+- **pkg/client/cache:** Limit the hash part of the identity file name
+- **pkg/client/state:** Cleanup mutex handling in StateService
+- **pkg/server:** Warn if sysadmin user password was not reset
+- **pkg/server:** Better warning for unchanged admin password
+- **test/performance-test-suite:** Add summary to json output
+
+### Features
+- **ci:** fix message and input
+- **ci:** add runner name to mattermost message header
+- **ci:** simplify results extraction
+- **ci:** extract performance tests into separate workflow to be reused
+- **ci:** add scheduled daily test runs and send results to Mattermost
+- **pkg/replication:** Disable server's identity check in internal replication
+
+
 <a name="v1.4.0"></a>
 ## [v1.4.0] - 2022-10-12
 ### Bug Fixes
@@ -3093,7 +3901,22 @@ All notable changes to this project will be documented in this file. This projec
 - **tree:** MTH reference impl
 
 
-[Unreleased]: https://github.com/vchain-us/immudb/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/vchain-us/immudb/compare/v1.9.5...HEAD
+[v1.9.5]: https://github.com/vchain-us/immudb/compare/v1.9.4...v1.9.5
+[v1.9.4]: https://github.com/vchain-us/immudb/compare/v1.9.3...v1.9.4
+[v1.9.3]: https://github.com/vchain-us/immudb/compare/v1.9DOM.2...v1.9.3
+[v1.9DOM.2]: https://github.com/vchain-us/immudb/compare/v1.9DOM.2-RC1...v1.9DOM.2
+[v1.9DOM.2-RC1]: https://github.com/vchain-us/immudb/compare/v1.9DOM.1...v1.9DOM.2-RC1
+[v1.9DOM.1]: https://github.com/vchain-us/immudb/compare/v1.9DOM.1-RC1...v1.9DOM.1
+[v1.9DOM.1-RC1]: https://github.com/vchain-us/immudb/compare/v1.9DOM.0...v1.9DOM.1-RC1
+[v1.9DOM.0]: https://github.com/vchain-us/immudb/compare/v1.9DOM...v1.9DOM.0
+[v1.9DOM]: https://github.com/vchain-us/immudb/compare/v1.9.0-RC2...v1.9DOM
+[v1.9.0-RC2]: https://github.com/vchain-us/immudb/compare/v1.9.0-RC1...v1.9.0-RC2
+[v1.9.0-RC1]: https://github.com/vchain-us/immudb/compare/v1.5.0...v1.9.0-RC1
+[v1.5.0]: https://github.com/vchain-us/immudb/compare/v1.5.0-RC1...v1.5.0
+[v1.5.0-RC1]: https://github.com/vchain-us/immudb/compare/v1.4.1...v1.5.0-RC1
+[v1.4.1]: https://github.com/vchain-us/immudb/compare/v1.4.1-RC1...v1.4.1
+[v1.4.1-RC1]: https://github.com/vchain-us/immudb/compare/v1.4.0...v1.4.1-RC1
 [v1.4.0]: https://github.com/vchain-us/immudb/compare/v1.4.0-RC2...v1.4.0
 [v1.4.0-RC2]: https://github.com/vchain-us/immudb/compare/v1.4.0-RC1...v1.4.0-RC2
 [v1.4.0-RC1]: https://github.com/vchain-us/immudb/compare/v1.3.2...v1.4.0-RC1

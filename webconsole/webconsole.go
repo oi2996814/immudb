@@ -1,21 +1,24 @@
+//go:build webconsole
 // +build webconsole
 
 package webconsole
 
-//go:generate go run github.com/rakyll/statik -f -src=./dist -p=webconsole -dest=../ -tags=webconsole
-
 import (
-	"github.com/codenotary/immudb/pkg/logger"
+	"embed"
+	"github.com/codenotary/immudb/embedded/logger"
+	"io/fs"
 	"net/http"
-	"github.com/rakyll/statik/fs"
 )
 
+//go:embed dist/*
+var content embed.FS
+
 func SetupWebconsole(mux *http.ServeMux, l logger.Logger, addr string) error {
-	statikFS, err := fs.New()
+	fSys, err := fs.Sub(content, "dist")
 	if err != nil {
 		return err
 	}
 	l.Infof("Webconsole enabled: %s", addr)
-	mux.Handle("/", http.FileServer(statikFS))
+	mux.Handle("/", http.FileServer(http.FS(fSys)))
 	return nil
 }

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,21 +17,17 @@ limitations under the License.
 package server
 
 import (
+	"context"
 	"crypto/tls"
-	"io/ioutil"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestStartWebServerHTTP(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	options := DefaultOptions().WithDir(dir)
 	server := DefaultServer().WithOptions(options).(*ImmuServer)
@@ -41,30 +37,53 @@ func TestStartWebServerHTTP(t *testing.T) {
 		ClientAuth:   tls.VerifyClientCertIfGiven,
 	}
 
-	webServer, err := StartWebServer(
-		"0.0.0.0:8080",
+	webServer, err := startWebServer(
+		context.Background(),
+		options.Bind(),
+		options.WebBind(),
 		tlsConfig,
 		server,
 		&mockLogger{})
 	require.NoError(t, err)
 	defer webServer.Close()
 
-	assert.IsType(t, &http.Server{}, webServer)
+	require.IsType(t, &http.Server{}, webServer)
 
 	client := &http.Client{}
-	assert.Eventually(t, func() bool {
-		_, err = client.Get("http://0.0.0.0:8080")
+	require.Eventually(t, func() bool {
+		_, err = client.Get("http://" + options.WebBind())
 		return err == nil
 	}, 10*time.Second, 30*time.Millisecond)
 }
 
 func TestStartWebServerHTTPS(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	options := DefaultOptions().WithDir(dir)
 	server := DefaultServer().WithOptions(options).(*ImmuServer)
+
+	tlsConfig := tlsConfigTest(t)
+	webServer, err := startWebServer(
+		context.Background(),
+		options.Bind(),
+		options.WebBind(),
+		tlsConfig,
+		server,
+		&mockLogger{})
+	require.NoError(t, err)
+	defer webServer.Close()
+
+	require.IsType(t, &http.Server{}, webServer)
+
+	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	client := &http.Client{Transport: tr}
+	require.Eventually(t, func() bool {
+		_, err = client.Get("https://" + options.WebBind())
+		return err == nil
+	}, 10*time.Second, 30*time.Millisecond)
+}
+
+func tlsConfigTest(t *testing.T) *tls.Config {
 	certPem := []byte(`-----BEGIN CERTIFICATE-----
 MIIBhTCCASugAwIBAgIQIRi6zePL6mKjOipn+dNuaTAKBggqhkjOPQQDAjASMRAw
 DgYDVQQKEwdBY21lIENvMB4XDTE3MTAyMDE5NDMwNloXDTE4MTAyMDE5NDMwNlow
@@ -84,22 +103,5 @@ EKTcWGekdmdDPsHloRNtsiCa697B2O9IFA==
 
 	cert, err := tls.X509KeyPair(certPem, keyPem)
 	require.NoError(t, err)
-	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
-
-	webServer, err := StartWebServer(
-		"0.0.0.0:8080",
-		tlsConfig,
-		server,
-		&mockLogger{})
-	require.NoError(t, err)
-	defer webServer.Close()
-
-	assert.IsType(t, &http.Server{}, webServer)
-
-	tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	client := &http.Client{Transport: tr}
-	assert.Eventually(t, func() bool {
-		_, err = client.Get("https://0.0.0.0:8080")
-		return err == nil
-	}, 10*time.Second, 30*time.Millisecond)
+	return &tls.Config{Certificates: []tls.Certificate{cert}}
 }

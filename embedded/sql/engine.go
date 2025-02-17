@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,142 +17,176 @@ limitations under the License.
 package sql
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/codenotary/immudb/embedded/store"
 )
 
-var ErrNoSupported = errors.New("not supported")
-var ErrIllegalArguments = store.ErrIllegalArguments
-var ErrParsingError = errors.New("parsing error")
-var ErrDDLorDMLTxOnly = errors.New("transactions can NOT combine DDL and DML statements")
-var ErrDatabaseDoesNotExist = errors.New("database does not exist")
-var ErrDatabaseAlreadyExists = errors.New("database already exists")
-var ErrNoDatabaseSelected = errors.New("no database selected")
-var ErrTableAlreadyExists = errors.New("table already exists")
-var ErrTableDoesNotExist = errors.New("table does not exist")
-var ErrColumnDoesNotExist = errors.New("column does not exist")
-var ErrColumnAlreadyExists = errors.New("column already exists")
-var ErrSameOldAndNewColumnName = errors.New("same old and new column names")
-var ErrColumnNotIndexed = errors.New("column is not indexed")
-var ErrFunctionDoesNotExist = errors.New("function does not exist")
-var ErrLimitedKeyType = errors.New("indexed key of invalid type. Supported types are: INTEGER, VARCHAR[256] OR BLOB[256]")
-var ErrLimitedAutoIncrement = errors.New("only INTEGER single-column primary keys can be set as auto incremental")
-var ErrLimitedMaxLen = errors.New("only VARCHAR and BLOB types support max length")
-var ErrDuplicatedColumn = errors.New("duplicated column")
-var ErrInvalidColumn = errors.New("invalid column")
-var ErrPKCanNotBeNull = errors.New("primary key can not be null")
-var ErrPKCanNotBeUpdated = errors.New("primary key can not be updated")
-var ErrNotNullableColumnCannotBeNull = errors.New("not nullable column can not be null")
-var ErrNewColumnMustBeNullable = errors.New("new column must be nullable")
-var ErrIndexAlreadyExists = errors.New("index already exists")
-var ErrMaxNumberOfColumnsInIndexExceeded = errors.New("number of columns in multi-column index exceeded")
-var ErrNoAvailableIndex = errors.New("no available index")
-var ErrInvalidNumberOfValues = errors.New("invalid number of values provided")
-var ErrInvalidValue = errors.New("invalid value provided")
-var ErrInferredMultipleTypes = errors.New("inferred multiple types")
-var ErrExpectingDQLStmt = errors.New("illegal statement. DQL statement expected")
-var ErrLimitedOrderBy = errors.New("order is limit to one indexed column")
-var ErrLimitedGroupBy = errors.New("group by requires ordering by the grouping column")
-var ErrIllegalMappedKey = errors.New("error illegal mapped key")
-var ErrCorruptedData = store.ErrCorruptedData
-var ErrNoMoreRows = store.ErrNoMoreEntries
-var ErrInvalidTypes = errors.New("invalid types")
-var ErrUnsupportedJoinType = errors.New("unsupported join type")
-var ErrInvalidCondition = errors.New("invalid condition")
-var ErrHavingClauseRequiresGroupClause = errors.New("having clause requires group clause")
-var ErrNotComparableValues = errors.New("values are not comparable")
-var ErrUnexpected = errors.New("unexpected error")
-var ErrMaxKeyLengthExceeded = errors.New("max key length exceeded")
-var ErrMaxLengthExceeded = errors.New("max length exceeded")
-var ErrColumnIsNotAnAggregation = errors.New("column is not an aggregation")
-var ErrLimitedCount = errors.New("only unbounded counting is supported i.e. COUNT(*)")
-var ErrTxDoesNotExist = errors.New("tx does not exist")
-var ErrNestedTxNotSupported = errors.New("nested tx are not supported")
-var ErrNoOngoingTx = errors.New("no ongoing transaction")
-var ErrNonTransactionalStmt = errors.New("non transactional statement")
-var ErrDivisionByZero = errors.New("division by zero")
-var ErrMissingParameter = errors.New("missing parameter")
-var ErrUnsupportedParameter = errors.New("unsupported parameter")
-var ErrDuplicatedParameters = errors.New("duplicated parameters")
-var ErrLimitedIndexCreation = errors.New("index creation is only supported on empty tables")
-var ErrTooManyRows = errors.New("too many rows")
-var ErrAlreadyClosed = store.ErrAlreadyClosed
-var ErrAmbiguousSelector = errors.New("ambiguous selector")
-var ErrUnsupportedCast = errors.New("unsupported cast")
-var ErrColumnMismatchInUnionStmt = errors.New("column mismatch in union statement")
+var (
+	ErrNoSupported                            = errors.New("not supported")
+	ErrIllegalArguments                       = store.ErrIllegalArguments
+	ErrMultiIndexingNotEnabled                = fmt.Errorf("%w: multi-indexing must be enabled", store.ErrIllegalState)
+	ErrParsingError                           = errors.New("parsing error")
+	ErrDDLorDMLTxOnly                         = errors.New("transactions can NOT combine DDL and DML statements")
+	ErrUnspecifiedMultiDBHandler              = fmt.Errorf("%w: unspecified multidbHanlder", store.ErrIllegalState)
+	ErrDatabaseDoesNotExist                   = errors.New("database does not exist")
+	ErrDatabaseAlreadyExists                  = errors.New("database already exists")
+	ErrTableAlreadyExists                     = errors.New("table already exists")
+	ErrTableDoesNotExist                      = errors.New("table does not exist")
+	ErrColumnDoesNotExist                     = errors.New("column does not exist")
+	ErrColumnAlreadyExists                    = errors.New("column already exists")
+	ErrCannotDropColumn                       = errors.New("cannot drop column")
+	ErrSameOldAndNewNames                     = errors.New("same old and new names")
+	ErrColumnNotIndexed                       = errors.New("column is not indexed")
+	ErrFunctionDoesNotExist                   = errors.New("function does not exist")
+	ErrLimitedKeyType                         = errors.New("indexed key of unsupported type or exceeded length")
+	ErrLimitedAutoIncrement                   = errors.New("only INTEGER single-column primary keys can be set as auto incremental")
+	ErrLimitedMaxLen                          = errors.New("only VARCHAR and BLOB types support max length")
+	ErrDuplicatedColumn                       = errors.New("duplicated column")
+	ErrInvalidColumn                          = errors.New("invalid column")
+	ErrInvalidCheckConstraint                 = errors.New("invalid check constraint")
+	ErrCheckConstraintViolation               = errors.New("check constraint violation")
+	ErrReservedWord                           = errors.New("reserved word")
+	ErrNoPrimaryKey                           = errors.New("no primary key specified")
+	ErrPKCanNotBeNull                         = errors.New("primary key can not be null")
+	ErrPKCanNotBeUpdated                      = errors.New("primary key can not be updated")
+	ErrMultiplePrimaryKeys                    = errors.New("multiple primary keys are not allowed")
+	ErrNotNullableColumnCannotBeNull          = errors.New("not nullable column can not be null")
+	ErrNewColumnMustBeNullable                = errors.New("new column must be nullable")
+	ErrIndexAlreadyExists                     = errors.New("index already exists")
+	ErrMaxNumberOfColumnsInIndexExceeded      = errors.New("number of columns in multi-column index exceeded")
+	ErrIndexNotFound                          = errors.New("index not found")
+	ErrConstraintNotFound                     = errors.New("constraint not found")
+	ErrInvalidNumberOfValues                  = errors.New("invalid number of values provided")
+	ErrInvalidValue                           = errors.New("invalid value provided")
+	ErrInferredMultipleTypes                  = errors.New("inferred multiple types")
+	ErrExpectingDQLStmt                       = errors.New("illegal statement. DQL statement expected")
+	ErrColumnMustAppearInGroupByOrAggregation = errors.New("must appear in the group by clause or be used in an aggregated function")
+	ErrIllegalMappedKey                       = errors.New("error illegal mapped key")
+	ErrCorruptedData                          = store.ErrCorruptedData
+	ErrBrokenCatalogColSpecExpirable          = fmt.Errorf("%w: catalog column entry set as expirable", ErrCorruptedData)
+	ErrBrokenCatalogCheckConstraintExpirable  = fmt.Errorf("%w: catalog check constraint set as expirable", ErrCorruptedData)
+	ErrNoMoreRows                             = store.ErrNoMoreEntries
+	ErrInvalidTypes                           = errors.New("invalid types")
+	ErrUnsupportedJoinType                    = errors.New("unsupported join type")
+	ErrInvalidCondition                       = errors.New("invalid condition")
+	ErrHavingClauseRequiresGroupClause        = errors.New("having clause requires group clause")
+	ErrNotComparableValues                    = errors.New("values are not comparable")
+	ErrNumericTypeExpected                    = errors.New("numeric type expected")
+	ErrUnexpected                             = errors.New("unexpected error")
+	ErrMaxKeyLengthExceeded                   = errors.New("max key length exceeded")
+	ErrMaxLengthExceeded                      = errors.New("max length exceeded")
+	ErrColumnIsNotAnAggregation               = errors.New("column is not an aggregation")
+	ErrLimitedCount                           = errors.New("only unbounded counting is supported i.e. COUNT(*)")
+	ErrTxDoesNotExist                         = errors.New("tx does not exist")
+	ErrNestedTxNotSupported                   = errors.New("nested tx are not supported")
+	ErrNoOngoingTx                            = errors.New("no ongoing transaction")
+	ErrNonTransactionalStmt                   = errors.New("non transactional statement")
+	ErrDivisionByZero                         = errors.New("division by zero")
+	ErrMissingParameter                       = errors.New("missing parameter")
+	ErrUnsupportedParameter                   = errors.New("unsupported parameter")
+	ErrDuplicatedParameters                   = errors.New("duplicated parameters")
+	ErrLimitedIndexCreation                   = errors.New("unique index creation is only supported on empty tables")
+	ErrTooManyRows                            = errors.New("too many rows")
+	ErrAlreadyClosed                          = store.ErrAlreadyClosed
+	ErrAmbiguousSelector                      = errors.New("ambiguous selector")
+	ErrUnsupportedCast                        = fmt.Errorf("%w: unsupported cast", ErrInvalidValue)
+	ErrColumnMismatchInUnionStmt              = errors.New("column mismatch in union statement")
+	ErrCannotIndexJson                        = errors.New("cannot index column of type JSON")
+	ErrInvalidTxMetadata                      = errors.New("invalid transaction metadata")
+	ErrAccessDenied                           = errors.New("access denied")
+)
 
-var maxKeyLen = 256
+var MaxKeyLen = 512
 
-const EncIDLen = 4
-const EncLenLen = 4
+const (
+	EncIDLen  = 4
+	EncLenLen = 4
+)
 
 const MaxNumberOfColumnsInIndex = 8
 
 type Engine struct {
 	store *store.ImmuStore
 
-	prefix        []byte
-	distinctLimit int
-	autocommit    bool
-
-	currentDatabase string
-
-	multidbHandler MultiDBHandler
-
-	mutex sync.RWMutex
+	prefix                        []byte
+	distinctLimit                 int
+	sortBufferSize                int
+	autocommit                    bool
+	lazyIndexConstraintValidation bool
+	parseTxMetadata               func([]byte) (map[string]interface{}, error)
+	multidbHandler                MultiDBHandler
+	tableResolvers                map[string]TableResolver
 }
 
 type MultiDBHandler interface {
 	ListDatabases(ctx context.Context) ([]string, error)
 	CreateDatabase(ctx context.Context, db string, ifNotExists bool) error
 	UseDatabase(ctx context.Context, db string) error
-	ExecPreparedStmts(ctx context.Context, stmts []SQLStmt, params map[string]interface{}) (ntx *SQLTx, committedTxs []*SQLTx, err error)
+	GetLoggedUser(ctx context.Context) (User, error)
+	ListUsers(ctx context.Context) ([]User, error)
+	CreateUser(ctx context.Context, username, password string, permission Permission) error
+	AlterUser(ctx context.Context, username, password string, permission Permission) error
+	GrantSQLPrivileges(ctx context.Context, database, username string, privileges []SQLPrivilege) error
+	RevokeSQLPrivileges(ctx context.Context, database, username string, privileges []SQLPrivilege) error
+	DropUser(ctx context.Context, username string) error
+	ExecPreparedStmts(ctx context.Context, opts *TxOptions, stmts []SQLStmt, params map[string]interface{}) (ntx *SQLTx, committedTxs []*SQLTx, err error)
 }
 
-//SQLTx (no-thread safe) represents an interactive or incremental transaction with support of RYOW
-type SQLTx struct {
-	engine *Engine
-
-	ctx context.Context
-
-	tx *store.OngoingTx
-
-	currentDB *Database
-	catalog   *Catalog // in-mem catalog
-
-	explicitClose bool
-
-	updatedRows      int
-	lastInsertedPKs  map[string]int64 // last inserted PK by table name
-	firstInsertedPKs map[string]int64 // first inserted PK by table name
-
-	txHeader *store.TxHeader // header is set once tx is committed
-
-	committed bool
-	closed    bool
+type TableResolver interface {
+	Table() string
+	Resolve(ctx context.Context, tx *SQLTx, alias string) (RowReader, error)
 }
 
-func NewEngine(store *store.ImmuStore, opts *Options) (*Engine, error) {
-	if store == nil || !ValidOpts(opts) {
+type User interface {
+	Username() string
+	Permission() Permission
+	SQLPrivileges() []SQLPrivilege
+}
+
+func NewEngine(st *store.ImmuStore, opts *Options) (*Engine, error) {
+	if st == nil {
 		return nil, ErrIllegalArguments
 	}
 
+	if !st.MultiIndexingEnabled() {
+		return nil, ErrMultiIndexingNotEnabled
+	}
+
+	err := opts.Validate()
+	if err != nil {
+		return nil, err
+	}
+
 	e := &Engine{
-		store:         store,
-		prefix:        make([]byte, len(opts.prefix)),
-		distinctLimit: opts.distinctLimit,
-		autocommit:    opts.autocommit,
+		store:                         st,
+		prefix:                        make([]byte, len(opts.prefix)),
+		distinctLimit:                 opts.distinctLimit,
+		sortBufferSize:                opts.sortBufferSize,
+		autocommit:                    opts.autocommit,
+		lazyIndexConstraintValidation: opts.lazyIndexConstraintValidation,
+		parseTxMetadata:               opts.parseTxMetadata,
+		multidbHandler:                opts.multidbHandler,
 	}
 
 	copy(e.prefix, opts.prefix)
+
+	err = st.InitIndexing(&store.IndexSpec{
+		SourcePrefix:     append(e.prefix, []byte(catalogPrefix)...),
+		TargetPrefix:     append(e.prefix, []byte(catalogPrefix)...),
+		InjectiveMapping: true,
+	})
+	if err != nil && !errors.Is(err, store.ErrIndexAlreadyInitialized) {
+		return nil, err
+	}
+
+	for _, r := range opts.tableResolvers {
+		e.registerTableResolver(r.Table(), r)
+	}
 
 	// TODO: find a better way to handle parsing errors
 	yyErrorVerbose = true
@@ -160,283 +194,121 @@ func NewEngine(store *store.ImmuStore, opts *Options) (*Engine, error) {
 	return e, nil
 }
 
-func (e *Engine) SetMultiDBHandler(handler MultiDBHandler) {
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
-	e.multidbHandler = handler
-}
-
-func (e *Engine) SetCurrentDatabase(dbName string) error {
-	tx, err := e.NewTx(context.Background())
-	if err != nil {
-		return err
-	}
-	defer tx.Cancel()
-
-	db, exists := tx.catalog.dbsByName[dbName]
-	if !exists {
-		return ErrDatabaseDoesNotExist
-	}
-
-	e.mutex.Lock()
-	defer e.mutex.Unlock()
-
-	e.currentDatabase = db.name
-
-	return nil
-}
-
-func (e *Engine) CurrentDatabase() string {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	return e.currentDatabase
-}
-
-func (e *Engine) NewTx(ctx context.Context) (*SQLTx, error) {
-	e.mutex.RLock()
-	defer e.mutex.RUnlock()
-
-	tx, err := e.store.NewTx()
+func (e *Engine) NewTx(ctx context.Context, opts *TxOptions) (*SQLTx, error) {
+	err := opts.Validate()
 	if err != nil {
 		return nil, err
 	}
 
-	catalog := newCatalog()
+	var mode store.TxMode
+	if opts.ReadOnly {
+		mode = store.ReadOnlyTx
+	} else {
+		mode = store.ReadWriteTx
+	}
 
-	err = catalog.load(e.prefix, tx)
+	txOpts := &store.TxOptions{
+		Mode:                    mode,
+		SnapshotMustIncludeTxID: opts.SnapshotMustIncludeTxID,
+		SnapshotRenewalPeriod:   opts.SnapshotRenewalPeriod,
+		UnsafeMVCC:              opts.UnsafeMVCC,
+	}
+
+	tx, err := e.store.NewTx(ctx, txOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	var currentDB *Database
-
-	if e.currentDatabase != "" {
-		db, exists := catalog.dbsByName[e.currentDatabase]
-		if !exists {
-			return nil, ErrDatabaseDoesNotExist
+	if len(opts.Extra) > 0 {
+		txmd := store.NewTxMetadata()
+		err := txmd.WithExtra(opts.Extra)
+		if err != nil {
+			return nil, err
 		}
 
-		currentDB = db
+		tx.WithMetadata(txmd)
 	}
 
-	return &SQLTx{
-		engine:           e,
-		ctx:              ctx,
-		tx:               tx,
-		catalog:          catalog,
-		currentDB:        currentDB,
-		lastInsertedPKs:  make(map[string]int64),
-		firstInsertedPKs: make(map[string]int64),
-	}, nil
-}
+	catalog := newCatalog(e.prefix)
 
-func (sqlTx *SQLTx) useDatabase(dbName string) error {
-	db, err := sqlTx.catalog.GetDatabaseByName(dbName)
+	err = catalog.load(ctx, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	sqlTx.currentDB = db
+	for _, table := range catalog.GetTables() {
+		primaryIndex := table.primaryIndex
 
-	return nil
-}
+		rowEntryPrefix := MapKey(
+			e.prefix,
+			RowPrefix,
+			EncodeID(DatabaseID),
+			EncodeID(table.id),
+			EncodeID(primaryIndex.id),
+		)
 
-func (sqlTx *SQLTx) Database() *Database {
-	return sqlTx.currentDB
-}
+		mappedPKEntryPrefix := MapKey(
+			e.prefix,
+			MappedPrefix,
+			EncodeID(table.id),
+			EncodeID(primaryIndex.id),
+		)
 
-func (sqlTx *SQLTx) Timestamp() time.Time {
-	return sqlTx.tx.Timestamp()
-}
+		err = e.store.InitIndexing(&store.IndexSpec{
+			SourcePrefix: rowEntryPrefix,
 
-func (sqlTx *SQLTx) UpdatedRows() int {
-	return sqlTx.updatedRows
-}
+			TargetEntryMapper: indexEntryMapperFor(primaryIndex, primaryIndex),
+			TargetPrefix:      mappedPKEntryPrefix,
 
-func (sqlTx *SQLTx) LastInsertedPKs() map[string]int64 {
-	return sqlTx.lastInsertedPKs
-}
-
-func (sqlTx *SQLTx) FirstInsertedPKs() map[string]int64 {
-	return sqlTx.firstInsertedPKs
-}
-
-func (sqlTx *SQLTx) TxHeader() *store.TxHeader {
-	return sqlTx.txHeader
-}
-
-func (sqlTx *SQLTx) sqlPrefix() []byte {
-	return sqlTx.engine.prefix
-}
-
-func (sqlTx *SQLTx) distinctLimit() int {
-	return sqlTx.engine.distinctLimit
-}
-
-func (sqlTx *SQLTx) newKeyReader(rSpec *store.KeyReaderSpec) (*store.KeyReader, error) {
-	return sqlTx.tx.NewKeyReader(rSpec)
-}
-
-func (sqlTx *SQLTx) get(key []byte) (store.ValueRef, error) {
-	return sqlTx.tx.Get(key)
-}
-
-func (sqlTx *SQLTx) set(key []byte, metadata *store.KVMetadata, value []byte) error {
-	return sqlTx.tx.Set(key, metadata, value)
-}
-
-func (sqlTx *SQLTx) existKeyWith(prefix, neq []byte) (bool, error) {
-	return sqlTx.tx.ExistKeyWith(prefix, neq)
-}
-
-func (sqlTx *SQLTx) Cancel() error {
-	if sqlTx.closed {
-		return ErrAlreadyClosed
-	}
-
-	sqlTx.closed = true
-
-	return sqlTx.tx.Cancel()
-}
-
-func (sqlTx *SQLTx) commit() error {
-	if sqlTx.closed {
-		return ErrAlreadyClosed
-	}
-
-	sqlTx.committed = true
-	sqlTx.closed = true
-
-	hdr, err := sqlTx.tx.Commit()
-	if err != nil && err != store.ErrorNoEntriesProvided {
-		return err
-	}
-
-	sqlTx.txHeader = hdr
-
-	return nil
-}
-
-func (sqlTx *SQLTx) Closed() bool {
-	return sqlTx.closed
-}
-
-func (c *Catalog) load(sqlPrefix []byte, tx *store.OngoingTx) error {
-	dbReaderSpec := &store.KeyReaderSpec{
-		Prefix:  mapKey(sqlPrefix, catalogDatabasePrefix),
-		Filters: []store.FilterFn{store.IgnoreExpired, store.IgnoreDeleted},
-	}
-
-	dbReader, err := tx.NewKeyReader(dbReaderSpec)
-	if err != nil {
-		return err
-	}
-	defer dbReader.Close()
-
-	for {
-		mkey, vref, err := dbReader.Read()
-		if err == store.ErrNoMoreEntries {
-			break
-		}
-		if err != nil {
-			return err
+			InjectiveMapping: true,
+		})
+		if err != nil && !errors.Is(err, store.ErrIndexAlreadyInitialized) {
+			return nil, err
 		}
 
-		id, err := unmapDatabaseID(sqlPrefix, mkey)
-		if err != nil {
-			return err
-		}
+		for _, index := range table.indexes {
+			if index.IsPrimary() {
+				continue
+			}
 
-		v, err := vref.Resolve()
-		if err != nil {
-			return err
-		}
+			mappedEntryPrefix := MapKey(
+				e.prefix,
+				MappedPrefix,
+				EncodeID(table.id),
+				EncodeID(index.id),
+			)
 
-		db, err := c.newDatabase(id, string(v))
-		if err != nil {
-			return err
-		}
+			err = e.store.InitIndexing(&store.IndexSpec{
+				SourcePrefix:      rowEntryPrefix,
+				SourceEntryMapper: indexEntryMapperFor(primaryIndex, primaryIndex),
+				TargetEntryMapper: indexEntryMapperFor(index, primaryIndex),
+				TargetPrefix:      mappedEntryPrefix,
 
-		err = db.loadTables(sqlPrefix, tx)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (db *Database) loadTables(sqlPrefix []byte, tx *store.OngoingTx) error {
-	dbReaderSpec := &store.KeyReaderSpec{
-		Prefix:  mapKey(sqlPrefix, catalogTablePrefix, EncodeID(db.id)),
-		Filters: []store.FilterFn{store.IgnoreExpired, store.IgnoreDeleted},
-	}
-
-	tableReader, err := tx.NewKeyReader(dbReaderSpec)
-	if err != nil {
-		return err
-	}
-	defer tableReader.Close()
-
-	for {
-		mkey, vref, err := tableReader.Read()
-		if err == store.ErrNoMoreEntries {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		dbID, tableID, err := unmapTableID(sqlPrefix, mkey)
-		if err != nil {
-			return err
-		}
-
-		if dbID != db.id {
-			return ErrCorruptedData
-		}
-
-		colSpecs, err := loadColSpecs(db.id, tableID, tx, sqlPrefix)
-		if err != nil {
-			return err
-		}
-
-		v, err := vref.Resolve()
-		if err != nil {
-			return err
-		}
-
-		table, err := db.newTable(string(v), colSpecs)
-		if err != nil {
-			return err
-		}
-
-		if tableID != table.id {
-			return ErrCorruptedData
-		}
-
-		err = table.loadIndexes(sqlPrefix, tx)
-		if err != nil {
-			return err
-		}
-
-		if table.autoIncrementPK {
-			encMaxPK, err := loadMaxPK(sqlPrefix, tx, table)
-			if err == store.ErrNoMoreEntries {
+				InjectiveMapping: true,
+			})
+			if errors.Is(err, store.ErrIndexAlreadyInitialized) {
 				continue
 			}
 			if err != nil {
-				return err
+				return nil, err
+			}
+		}
+
+		if table.autoIncrementPK {
+			encMaxPK, err := loadMaxPK(ctx, e.prefix, tx, table)
+			if errors.Is(err, store.ErrNoMoreEntries) {
+				continue
+			}
+			if err != nil {
+				return nil, err
 			}
 
 			if len(encMaxPK) != 9 {
-				return ErrCorruptedData
+				return nil, ErrCorruptedData
 			}
 
 			if encMaxPK[0] != KeyValPrefixNotNull {
-				return ErrCorruptedData
+				return nil, ErrCorruptedData
 			}
 
 			// map to signed integer space
@@ -446,678 +318,103 @@ func (db *Database) loadTables(sqlPrefix []byte, tx *store.OngoingTx) error {
 		}
 	}
 
-	return nil
+	return &SQLTx{
+		engine:           e,
+		opts:             opts,
+		tx:               tx,
+		catalog:          catalog,
+		lastInsertedPKs:  make(map[string]int64),
+		firstInsertedPKs: make(map[string]int64),
+	}, nil
 }
 
-func loadMaxPK(sqlPrefix []byte, tx *store.OngoingTx, table *Table) ([]byte, error) {
-	pkReaderSpec := &store.KeyReaderSpec{
-		Prefix:    mapKey(sqlPrefix, PIndexPrefix, EncodeID(table.db.id), EncodeID(table.id), EncodeID(PKIndexID)),
-		DescOrder: true,
-	}
+func indexEntryMapperFor(index, primaryIndex *Index) store.EntryMapper {
+	// value={count (colID valLen val)+})
+	// key=M.{tableID}{indexID}({null}({val}{padding}{valLen})?)+({pkVal}{padding}{pkValLen})+
 
-	pkReader, err := tx.NewKeyReader(pkReaderSpec)
-	if err != nil {
-		return nil, err
-	}
-	defer pkReader.Close()
+	valueExtractor := func(value []byte, valuesByColID map[uint32]TypedValue) error {
+		voff := 0
 
-	mkey, _, err := pkReader.Read()
-	if err != nil {
-		return nil, err
-	}
+		cols := int(binary.BigEndian.Uint32(value[voff:]))
+		voff += EncLenLen
 
-	return unmapIndexEntry(table.primaryIndex, sqlPrefix, mkey)
-}
-
-func loadColSpecs(dbID, tableID uint32, tx *store.OngoingTx, sqlPrefix []byte) (specs []*ColSpec, err error) {
-	initialKey := mapKey(sqlPrefix, catalogColumnPrefix, EncodeID(dbID), EncodeID(tableID))
-
-	dbReaderSpec := &store.KeyReaderSpec{
-		Prefix:  initialKey,
-		Filters: []store.FilterFn{store.IgnoreExpired, store.IgnoreDeleted},
-	}
-
-	colSpecReader, err := tx.NewKeyReader(dbReaderSpec)
-	if err != nil {
-		return nil, err
-	}
-	defer colSpecReader.Close()
-
-	specs = make([]*ColSpec, 0)
-
-	for {
-		mkey, vref, err := colSpecReader.Read()
-		if err == store.ErrNoMoreEntries {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		mdbID, mtableID, colID, colType, err := unmapColSpec(sqlPrefix, mkey)
-		if err != nil {
-			return nil, err
-		}
-
-		if dbID != mdbID || tableID != mtableID {
-			return nil, ErrCorruptedData
-		}
-
-		v, err := vref.Resolve()
-		if err != nil {
-			return nil, err
-		}
-		if len(v) < 6 {
-			return nil, ErrCorruptedData
-		}
-
-		spec := &ColSpec{
-			colName:       string(v[5:]),
-			colType:       colType,
-			maxLen:        int(binary.BigEndian.Uint32(v[1:])),
-			autoIncrement: v[0]&autoIncrementFlag != 0,
-			notNull:       v[0]&nullableFlag != 0,
-		}
-
-		specs = append(specs, spec)
-
-		if int(colID) != len(specs) {
-			return nil, ErrCorruptedData
-		}
-	}
-
-	return
-}
-
-func (table *Table) loadIndexes(sqlPrefix []byte, tx *store.OngoingTx) error {
-	initialKey := mapKey(sqlPrefix, catalogIndexPrefix, EncodeID(table.db.id), EncodeID(table.id))
-
-	idxReaderSpec := &store.KeyReaderSpec{
-		Prefix:  initialKey,
-		Filters: []store.FilterFn{store.IgnoreExpired, store.IgnoreDeleted},
-	}
-
-	idxSpecReader, err := tx.NewKeyReader(idxReaderSpec)
-	if err != nil {
-		return err
-	}
-	defer idxSpecReader.Close()
-
-	for {
-		mkey, vref, err := idxSpecReader.Read()
-		if err == store.ErrNoMoreEntries {
-			break
-		}
-		if err != nil {
-			return err
-		}
-
-		dbID, tableID, indexID, err := unmapIndex(sqlPrefix, mkey)
-		if err != nil {
-			return err
-		}
-
-		if table.id != tableID || table.db.id != dbID {
-			return ErrCorruptedData
-		}
-
-		v, err := vref.Resolve()
-		if err != nil {
-			return err
-		}
-
-		// v={unique {colID1}(ASC|DESC)...{colIDN}(ASC|DESC)}
-		colSpecLen := EncIDLen + 1
-
-		if len(v) < 1+colSpecLen || len(v)%colSpecLen != 1 {
-			return ErrCorruptedData
-		}
-
-		var colIDs []uint32
-
-		for i := 1; i < len(v); i += colSpecLen {
-			colID := binary.BigEndian.Uint32(v[i:])
-
-			// TODO: currently only ASC order is supported
-			if v[i+EncIDLen] != 0 {
-				return ErrCorruptedData
+		for i := 0; i < cols; i++ {
+			if len(value) < EncIDLen {
+				return fmt.Errorf("key is lower than required")
 			}
 
-			colIDs = append(colIDs, colID)
-		}
+			colID := binary.BigEndian.Uint32(value[voff:])
+			voff += EncIDLen
 
-		index, err := table.newIndex(v[0] > 0, colIDs)
-		if err != nil {
-			return err
-		}
-
-		if indexID != index.id {
-			return ErrCorruptedData
-		}
-	}
-
-	return nil
-}
-
-func trimPrefix(prefix, mkey []byte, mappingPrefix []byte) ([]byte, error) {
-	if len(prefix)+len(mappingPrefix) > len(mkey) ||
-		!bytes.Equal(prefix, mkey[:len(prefix)]) ||
-		!bytes.Equal(mappingPrefix, mkey[len(prefix):len(prefix)+len(mappingPrefix)]) {
-		return nil, ErrIllegalMappedKey
-	}
-
-	return mkey[len(prefix)+len(mappingPrefix):], nil
-}
-
-func unmapDatabaseID(prefix, mkey []byte) (dbID uint32, err error) {
-	encID, err := trimPrefix(prefix, mkey, []byte(catalogDatabasePrefix))
-	if err != nil {
-		return 0, err
-	}
-
-	if len(encID) != EncIDLen {
-		return 0, ErrCorruptedData
-	}
-
-	return binary.BigEndian.Uint32(encID), nil
-}
-
-func unmapTableID(prefix, mkey []byte) (dbID, tableID uint32, err error) {
-	encID, err := trimPrefix(prefix, mkey, []byte(catalogTablePrefix))
-	if err != nil {
-		return 0, 0, err
-	}
-
-	if len(encID) != EncIDLen*2 {
-		return 0, 0, ErrCorruptedData
-	}
-
-	dbID = binary.BigEndian.Uint32(encID)
-	tableID = binary.BigEndian.Uint32(encID[EncIDLen:])
-
-	return
-}
-
-func unmapColSpec(prefix, mkey []byte) (dbID, tableID, colID uint32, colType SQLValueType, err error) {
-	encID, err := trimPrefix(prefix, mkey, []byte(catalogColumnPrefix))
-	if err != nil {
-		return 0, 0, 0, "", err
-	}
-
-	if len(encID) < EncIDLen*3 {
-		return 0, 0, 0, "", ErrCorruptedData
-	}
-
-	dbID = binary.BigEndian.Uint32(encID)
-	tableID = binary.BigEndian.Uint32(encID[EncIDLen:])
-	colID = binary.BigEndian.Uint32(encID[2*EncIDLen:])
-
-	colType, err = asType(string(encID[EncIDLen*3:]))
-	if err != nil {
-		return 0, 0, 0, "", ErrCorruptedData
-	}
-
-	return
-}
-
-func asType(t string) (SQLValueType, error) {
-	if t == IntegerType ||
-		t == BooleanType ||
-		t == VarcharType ||
-		t == BLOBType ||
-		t == TimestampType {
-		return t, nil
-	}
-
-	return t, ErrCorruptedData
-}
-
-func unmapIndex(sqlPrefix, mkey []byte) (dbID, tableID, indexID uint32, err error) {
-	encID, err := trimPrefix(sqlPrefix, mkey, []byte(catalogIndexPrefix))
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	if len(encID) != EncIDLen*3 {
-		return 0, 0, 0, ErrCorruptedData
-	}
-
-	dbID = binary.BigEndian.Uint32(encID)
-	tableID = binary.BigEndian.Uint32(encID[EncIDLen:])
-	indexID = binary.BigEndian.Uint32(encID[EncIDLen*2:])
-
-	return
-}
-
-func unmapIndexEntry(index *Index, sqlPrefix, mkey []byte) (encPKVals []byte, err error) {
-	if index == nil {
-		return nil, ErrIllegalArguments
-	}
-
-	enc, err := trimPrefix(sqlPrefix, mkey, []byte(index.prefix()))
-	if err != nil {
-		return nil, ErrCorruptedData
-	}
-
-	if len(enc) <= EncIDLen*3 {
-		return nil, ErrCorruptedData
-	}
-
-	off := 0
-
-	dbID := binary.BigEndian.Uint32(enc[off:])
-	off += EncIDLen
-
-	tableID := binary.BigEndian.Uint32(enc[off:])
-	off += EncIDLen
-
-	indexID := binary.BigEndian.Uint32(enc[off:])
-	off += EncIDLen
-
-	if dbID != index.table.db.id || tableID != index.table.id || indexID != index.id {
-		return nil, ErrCorruptedData
-	}
-
-	if !index.IsPrimary() {
-		//read index values
-		for _, col := range index.cols {
-			if enc[off] == KeyValPrefixNull {
-				off += 1
+			col, err := index.table.GetColumnByID(colID)
+			if errors.Is(err, ErrColumnDoesNotExist) {
+				vlen := int(binary.BigEndian.Uint32(value[voff:]))
+				voff += EncLenLen + vlen
 				continue
-			}
-			if enc[off] != KeyValPrefixNotNull {
-				return nil, ErrCorruptedData
-			}
-			off += 1
-
-			maxLen := col.MaxLen()
-			if variableSized(col.colType) {
-				maxLen += EncLenLen
-			}
-			if len(enc)-off < maxLen {
-				return nil, ErrCorruptedData
+			} else if err != nil {
+				return err
 			}
 
-			off += maxLen
+			val, n, err := DecodeValue(value[voff:], col.colType)
+			if err != nil {
+				return err
+			}
+
+			voff += n
+
+			valuesByColID[colID] = val
 		}
+
+		return nil
 	}
 
-	//PK cannot be nil
-	if len(enc)-off < 1 {
-		return nil, ErrCorruptedData
-	}
+	return func(key, value []byte) ([]byte, error) {
+		encodedValues := make([][]byte, 2+len(index.cols)+1)
+		encodedValues[0] = EncodeID(index.table.id)
+		encodedValues[1] = EncodeID(index.id)
 
-	return enc[off:], nil
+		valuesByColID := make(map[uint32]TypedValue, len(index.cols))
+
+		for _, col := range index.table.cols {
+			valuesByColID[col.id] = &NullValue{t: col.colType}
+		}
+
+		err := valueExtractor(value, valuesByColID)
+		if err != nil {
+			return nil, err
+		}
+
+		for i, col := range index.cols {
+			encKey, _, err := EncodeValueAsKey(valuesByColID[col.id], col.Type(), col.MaxLen())
+			if err != nil {
+				return nil, err
+			}
+
+			encodedValues[2+i] = encKey
+		}
+
+		pkEncVals, err := encodedKey(primaryIndex, valuesByColID)
+		if err != nil {
+			return nil, err
+		}
+
+		encodedValues[len(encodedValues)-1] = pkEncVals
+
+		return MapKey(index.enginePrefix(), MappedPrefix, encodedValues...), nil
+	}
 }
 
-func variableSized(sqlType SQLValueType) bool {
-	return sqlType == VarcharType || sqlType == BLOBType
-}
-
-func mapKey(prefix []byte, mappingPrefix string, encValues ...[]byte) []byte {
-	return MapKey(prefix, mappingPrefix, encValues...)
-}
-
-func MapKey(prefix []byte, mappingPrefix string, encValues ...[]byte) []byte {
-	mkeyLen := len(prefix) + len(mappingPrefix)
-
-	for _, ev := range encValues {
-		mkeyLen += len(ev)
-	}
-
-	mkey := make([]byte, mkeyLen)
-
-	off := 0
-
-	copy(mkey, prefix)
-	off += len(prefix)
-
-	copy(mkey[off:], []byte(mappingPrefix))
-	off += len(mappingPrefix)
-
-	for _, ev := range encValues {
-		copy(mkey[off:], ev)
-		off += len(ev)
-	}
-
-	return mkey
-}
-
-func EncodeID(id uint32) []byte {
-	var encID [EncIDLen]byte
-	binary.BigEndian.PutUint32(encID[:], id)
-	return encID[:]
-}
-
-func EncodeValue(val interface{}, colType SQLValueType, maxLen int) ([]byte, error) {
-	switch colType {
-	case VarcharType:
-		{
-			strVal, ok := val.(string)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a string: %w", ErrInvalidValue,
-				)
-			}
-
-			if maxLen > 0 && len(strVal) > maxLen {
-				return nil, ErrMaxLengthExceeded
-			}
-
-			// len(v) + v
-			encv := make([]byte, EncLenLen+len(strVal))
-			binary.BigEndian.PutUint32(encv[:], uint32(len(strVal)))
-			copy(encv[EncLenLen:], []byte(strVal))
-
-			return encv, nil
-		}
-	case IntegerType:
-		{
-			intVal, ok := val.(int64)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not an integer: %w", ErrInvalidValue,
-				)
-			}
-
-			// map to unsigned integer space
-			// len(v) + v
-			var encv [EncLenLen + 8]byte
-			binary.BigEndian.PutUint32(encv[:], uint32(8))
-			binary.BigEndian.PutUint64(encv[EncLenLen:], uint64(intVal))
-
-			return encv[:], nil
-		}
-	case BooleanType:
-		{
-			boolVal, ok := val.(bool)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a boolean: %w", ErrInvalidValue,
-				)
-			}
-
-			// len(v) + v
-			var encv [EncLenLen + 1]byte
-			binary.BigEndian.PutUint32(encv[:], uint32(1))
-			if boolVal {
-				encv[EncLenLen] = 1
-			}
-
-			return encv[:], nil
-		}
-	case BLOBType:
-		{
-			var blobVal []byte
-
-			if val != nil {
-				v, ok := val.([]byte)
-				if !ok {
-					return nil, fmt.Errorf(
-						"value is not a blob: %w", ErrInvalidValue,
-					)
-				}
-				blobVal = v
-			}
-
-			if maxLen > 0 && len(blobVal) > maxLen {
-				return nil, ErrMaxLengthExceeded
-			}
-
-			// len(v) + v
-			encv := make([]byte, EncLenLen+len(blobVal))
-			binary.BigEndian.PutUint32(encv[:], uint32(len(blobVal)))
-			copy(encv[EncLenLen:], blobVal)
-
-			return encv[:], nil
-		}
-	case TimestampType:
-		{
-			timeVal, ok := val.(time.Time)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a timestamp: %w", ErrInvalidValue,
-				)
-			}
-
-			// len(v) + v
-			var encv [EncLenLen + 8]byte
-			binary.BigEndian.PutUint32(encv[:], uint32(8))
-			binary.BigEndian.PutUint64(encv[EncLenLen:], uint64(TimeToInt64(timeVal)))
-
-			return encv[:], nil
-		}
-	}
-
-	return nil, ErrInvalidValue
-}
-
-const (
-	KeyValPrefixNull       byte = 0x20
-	KeyValPrefixNotNull    byte = 0x80
-	KeyValPrefixUpperBound byte = 0xFF
-)
-
-func EncodeAsKey(val interface{}, colType SQLValueType, maxLen int) ([]byte, error) {
-	if maxLen <= 0 {
-		return nil, ErrInvalidValue
-	}
-	if maxLen > maxKeyLen {
-		return nil, ErrMaxKeyLengthExceeded
-	}
-
-	if val == nil {
-		return []byte{KeyValPrefixNull}, nil
-	}
-
-	switch colType {
-	case VarcharType:
-		{
-			strVal, ok := val.(string)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a string: %w", ErrInvalidValue,
-				)
-			}
-
-			if len(strVal) > maxLen {
-				return nil, ErrMaxLengthExceeded
-			}
-
-			// notnull + value + padding + len(value)
-			encv := make([]byte, 1+maxLen+EncLenLen)
-			encv[0] = KeyValPrefixNotNull
-			copy(encv[1:], []byte(strVal))
-			binary.BigEndian.PutUint32(encv[len(encv)-EncLenLen:], uint32(len(strVal)))
-
-			return encv, nil
-		}
-	case IntegerType:
-		{
-			if maxLen != 8 {
-				return nil, ErrCorruptedData
-			}
-
-			intVal, ok := val.(int64)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not an integer: %w", ErrInvalidValue,
-				)
-			}
-
-			// v
-			var encv [9]byte
-			encv[0] = KeyValPrefixNotNull
-			binary.BigEndian.PutUint64(encv[1:], uint64(intVal))
-			// map to unsigned integer space for lexical sorting order
-			encv[1] ^= 0x80
-
-			return encv[:], nil
-		}
-	case BooleanType:
-		{
-			if maxLen != 1 {
-				return nil, ErrCorruptedData
-			}
-
-			boolVal, ok := val.(bool)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a boolean: %w", ErrInvalidValue,
-				)
-			}
-
-			// v
-			var encv [2]byte
-			encv[0] = KeyValPrefixNotNull
-			if boolVal {
-				encv[1] = 1
-			}
-
-			return encv[:], nil
-		}
-	case BLOBType:
-		{
-			blobVal, ok := val.([]byte)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a blob: %w", ErrInvalidValue,
-				)
-			}
-
-			if len(blobVal) > maxLen {
-				return nil, ErrMaxLengthExceeded
-			}
-
-			// notnull + value + padding + len(value)
-			encv := make([]byte, 1+maxLen+EncLenLen)
-			encv[0] = KeyValPrefixNotNull
-			copy(encv[1:], []byte(blobVal))
-			binary.BigEndian.PutUint32(encv[len(encv)-EncLenLen:], uint32(len(blobVal)))
-
-			return encv, nil
-		}
-	case TimestampType:
-		{
-			if maxLen != 8 {
-				return nil, ErrCorruptedData
-			}
-
-			timeVal, ok := val.(time.Time)
-			if !ok {
-				return nil, fmt.Errorf(
-					"value is not a timestamp: %w", ErrInvalidValue,
-				)
-			}
-
-			// v
-			var encv [9]byte
-			encv[0] = KeyValPrefixNotNull
-			binary.BigEndian.PutUint64(encv[1:], uint64(timeVal.UnixNano()))
-			// map to unsigned integer space for lexical sorting order
-			encv[1] ^= 0x80
-
-			return encv[:], nil
-		}
-
-	}
-
-	return nil, ErrInvalidValue
-}
-
-func DecodeValue(b []byte, colType SQLValueType) (TypedValue, int, error) {
-	if len(b) < EncLenLen {
-		return nil, 0, ErrCorruptedData
-	}
-
-	vlen := int(binary.BigEndian.Uint32(b[:]))
-	voff := EncLenLen
-
-	if vlen < 0 || len(b) < voff+vlen {
-		return nil, 0, ErrCorruptedData
-	}
-
-	switch colType {
-	case VarcharType:
-		{
-			v := string(b[voff : voff+vlen])
-			voff += vlen
-
-			return &Varchar{val: v}, voff, nil
-		}
-	case IntegerType:
-		{
-			if vlen != 8 {
-				return nil, 0, ErrCorruptedData
-			}
-
-			v := binary.BigEndian.Uint64(b[voff:])
-			voff += vlen
-
-			return &Number{val: int64(v)}, voff, nil
-		}
-	case BooleanType:
-		{
-			if vlen != 1 {
-				return nil, 0, ErrCorruptedData
-			}
-
-			v := b[voff] == 1
-			voff += 1
-
-			return &Bool{val: v}, voff, nil
-		}
-	case BLOBType:
-		{
-			v := b[voff : voff+vlen]
-			voff += vlen
-
-			return &Blob{val: v}, voff, nil
-		}
-	case TimestampType:
-		{
-			if vlen != 8 {
-				return nil, 0, ErrCorruptedData
-			}
-
-			v := binary.BigEndian.Uint64(b[voff:])
-			voff += vlen
-
-			return &Timestamp{val: TimeFromInt64(int64(v))}, voff, nil
-		}
-	}
-
-	return nil, 0, ErrCorruptedData
-}
-
-func normalizeParams(params map[string]interface{}) (map[string]interface{}, error) {
-	nparams := make(map[string]interface{}, len(params))
-
-	for name, value := range params {
-		nname := strings.ToLower(name)
-
-		_, exists := nparams[nname]
-		if exists {
-			return nil, ErrDuplicatedParameters
-		}
-
-		nparams[nname] = value
-	}
-
-	return nparams, nil
-}
-
-func (e *Engine) Exec(sql string, params map[string]interface{}, tx *SQLTx) (ntx *SQLTx, committedTxs []*SQLTx, err error) {
-	stmts, err := Parse(strings.NewReader(sql))
+func (e *Engine) Exec(ctx context.Context, tx *SQLTx, sql string, params map[string]interface{}) (ntx *SQLTx, committedTxs []*SQLTx, err error) {
+	stmts, err := ParseSQL(strings.NewReader(sql))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrParsingError, err)
 	}
 
-	return e.ExecPreparedStmts(stmts, params, tx)
+	return e.ExecPreparedStmts(ctx, tx, stmts, params)
 }
 
-func (e *Engine) ExecPreparedStmts(stmts []SQLStmt, params map[string]interface{}, tx *SQLTx) (ntx *SQLTx, committedTxs []*SQLTx, err error) {
-	ntx, ctxs, pendingStmts, err := e.execPreparedStmts(stmts, params, tx)
+func (e *Engine) ExecPreparedStmts(ctx context.Context, tx *SQLTx, stmts []SQLStmt, params map[string]interface{}) (ntx *SQLTx, committedTxs []*SQLTx, err error) {
+	ntx, ctxs, pendingStmts, err := e.execPreparedStmts(ctx, tx, stmts, params)
 	if err != nil {
 		return ntx, ctxs, err
 	}
@@ -1129,15 +426,15 @@ func (e *Engine) ExecPreparedStmts(stmts []SQLStmt, params map[string]interface{
 			return ntx, ctxs, fmt.Errorf("%w: all statements should have been executed when not using a multidbHandler", ErrUnexpected)
 		}
 
-		var ctx context.Context
+		var opts *TxOptions
 
 		if tx != nil {
-			ctx = tx.ctx
+			opts = tx.opts
 		} else {
-			ctx = context.Background()
+			opts = DefaultTxOptions()
 		}
 
-		ntx, hctxs, err := e.multidbHandler.ExecPreparedStmts(ctx, pendingStmts, params)
+		ntx, hctxs, err := e.multidbHandler.ExecPreparedStmts(ctx, opts, pendingStmts, params)
 
 		return ntx, append(ctxs, hctxs...), err
 	}
@@ -1145,7 +442,7 @@ func (e *Engine) ExecPreparedStmts(stmts []SQLStmt, params map[string]interface{
 	return ntx, ctxs, nil
 }
 
-func (e *Engine) execPreparedStmts(stmts []SQLStmt, params map[string]interface{}, tx *SQLTx) (ntx *SQLTx, committedTxs []*SQLTx, pendingStmts []SQLStmt, err error) {
+func (e *Engine) execPreparedStmts(ctx context.Context, tx *SQLTx, stmts []SQLStmt, params map[string]interface{}) (ntx *SQLTx, committedTxs []*SQLTx, pendingStmts []SQLStmt, err error) {
 	if len(stmts) == 0 {
 		return nil, nil, stmts, ErrIllegalArguments
 	}
@@ -1167,8 +464,8 @@ func (e *Engine) execPreparedStmts(stmts []SQLStmt, params map[string]interface{
 		_, isDBSelectionStmt := stmt.(*UseDatabaseStmt)
 
 		// handle the case when working in non-autocommit mode outside a transaction block
-		if isDBSelectionStmt && (currTx != nil && !currTx.closed) && !currTx.explicitClose {
-			err = currTx.commit()
+		if isDBSelectionStmt && (currTx != nil && !currTx.Closed()) && !currTx.IsExplicitCloseRequired() {
+			err = currTx.Commit(ctx)
 			if err == nil {
 				committedTxs = append(committedTxs, currTx)
 			}
@@ -1177,38 +474,45 @@ func (e *Engine) execPreparedStmts(stmts []SQLStmt, params map[string]interface{
 			}
 		}
 
-		if currTx == nil || currTx.closed {
-			var ctx context.Context
+		if currTx == nil || currTx.Closed() {
+			var opts *TxOptions
 
 			if currTx != nil {
-				ctx = currTx.ctx
+				opts = currTx.opts
 			} else if tx != nil {
-				ctx = tx.ctx
+				opts = tx.opts
 			} else {
-				ctx = context.Background()
+				opts = DefaultTxOptions()
 			}
 
 			// begin tx with implicit commit
-			currTx, err = e.NewTx(ctx)
+			currTx, err = e.NewTx(ctx, opts)
 			if err != nil {
 				return nil, committedTxs, stmts[execStmts:], err
 			}
 		}
 
-		ntx, err := stmt.execAt(currTx, nparams)
+		if e.multidbHandler != nil {
+			if err := e.checkUserPermissions(ctx, stmt); err != nil {
+				currTx.Cancel()
+				return nil, committedTxs, stmts[execStmts:], err
+			}
+		}
+
+		ntx, err := stmt.execAt(ctx, currTx, nparams)
 		if err != nil {
 			currTx.Cancel()
 			return nil, committedTxs, stmts[execStmts:], err
 		}
 
-		if !currTx.closed && !currTx.explicitClose && e.autocommit {
-			err = currTx.commit()
+		if !currTx.Closed() && !currTx.IsExplicitCloseRequired() && e.autocommit {
+			err = currTx.Commit(ctx)
 			if err != nil {
 				return nil, committedTxs, stmts[execStmts:], err
 			}
 		}
 
-		if currTx.committed {
+		if currTx.Closed() {
 			committedTxs = append(committedTxs, currTx)
 		}
 
@@ -1221,8 +525,8 @@ func (e *Engine) execPreparedStmts(stmts []SQLStmt, params map[string]interface{
 		}
 	}
 
-	if currTx != nil && !currTx.closed && !currTx.explicitClose {
-		err = currTx.commit()
+	if currTx != nil && !currTx.Closed() && !currTx.IsExplicitCloseRequired() {
+		err = currTx.Commit(ctx)
 		if err != nil {
 			return nil, committedTxs, stmts[execStmts:], err
 		}
@@ -1230,15 +534,59 @@ func (e *Engine) execPreparedStmts(stmts []SQLStmt, params map[string]interface{
 		committedTxs = append(committedTxs, currTx)
 	}
 
-	if currTx != nil && currTx.closed {
+	if currTx != nil && currTx.Closed() {
 		currTx = nil
 	}
 
 	return currTx, committedTxs, stmts[execStmts:], nil
 }
 
-func (e *Engine) Query(sql string, params map[string]interface{}, tx *SQLTx) (RowReader, error) {
-	stmts, err := Parse(strings.NewReader(sql))
+func (e *Engine) checkUserPermissions(ctx context.Context, stmt SQLStmt) error {
+	user, err := e.multidbHandler.GetLoggedUser(ctx)
+	if err != nil {
+		return err
+	}
+
+	if !stmt.readOnly() && user.Permission() == PermissionReadOnly {
+		return fmt.Errorf("%w: statement requires %s permission", ErrAccessDenied, PermissionReadWrite)
+	}
+
+	requiredPrivileges := stmt.requiredPrivileges()
+	if !hasAllPrivileges(user.SQLPrivileges(), requiredPrivileges) {
+		return fmt.Errorf("%w: statement requires %v privileges", ErrAccessDenied, requiredPrivileges)
+	}
+	return nil
+}
+
+func hasAllPrivileges(userPrivileges, privileges []SQLPrivilege) bool {
+	for _, p := range privileges {
+		has := false
+		for _, up := range userPrivileges {
+			if up == p {
+				has = true
+				break
+			}
+		}
+
+		if !has {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *Engine) queryAll(ctx context.Context, tx *SQLTx, sql string, params map[string]interface{}) ([]*Row, error) {
+	reader, err := e.Query(ctx, tx, sql, params)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	return ReadAllRows(ctx, reader)
+}
+
+func (e *Engine) Query(ctx context.Context, tx *SQLTx, sql string, params map[string]interface{}) (RowReader, error) {
+	stmts, err := ParseSQL(strings.NewReader(sql))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrParsingError, err)
 	}
@@ -1251,10 +599,10 @@ func (e *Engine) Query(sql string, params map[string]interface{}, tx *SQLTx) (Ro
 		return nil, ErrExpectingDQLStmt
 	}
 
-	return e.QueryPreparedStmt(stmt, params, tx)
+	return e.QueryPreparedStmt(ctx, tx, stmt, params)
 }
 
-func (e *Engine) QueryPreparedStmt(stmt DataSource, params map[string]interface{}, tx *SQLTx) (rowReader RowReader, err error) {
+func (e *Engine) QueryPreparedStmt(ctx context.Context, tx *SQLTx, stmt DataSource, params map[string]interface{}) (rowReader RowReader, err error) {
 	if stmt == nil {
 		return nil, ErrIllegalArguments
 	}
@@ -1262,7 +610,7 @@ func (e *Engine) QueryPreparedStmt(stmt DataSource, params map[string]interface{
 	qtx := tx
 
 	if qtx == nil {
-		qtx, err = e.NewTx(context.Background())
+		qtx, err = e.NewTx(ctx, DefaultTxOptions().WithReadOnly(true))
 		if err != nil {
 			return nil, err
 		}
@@ -1278,12 +626,18 @@ func (e *Engine) QueryPreparedStmt(stmt DataSource, params map[string]interface{
 		return nil, err
 	}
 
-	_, err = stmt.execAt(qtx, nparams)
+	if e.multidbHandler != nil {
+		if err := e.checkUserPermissions(ctx, stmt); err != nil {
+			return nil, err
+		}
+	}
+
+	_, err = stmt.execAt(ctx, qtx, nparams)
 	if err != nil {
 		return nil, err
 	}
 
-	r, err := stmt.Resolve(qtx, nparams, nil)
+	r, err := stmt.Resolve(ctx, qtx, nparams, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1297,30 +651,29 @@ func (e *Engine) QueryPreparedStmt(stmt DataSource, params map[string]interface{
 	return r, nil
 }
 
-func (e *Engine) Catalog(tx *SQLTx) (catalog *Catalog, err error) {
+func (e *Engine) Catalog(ctx context.Context, tx *SQLTx) (catalog *Catalog, err error) {
 	qtx := tx
 
 	if qtx == nil {
-		qtx, err = e.NewTx(context.Background())
+		qtx, err = e.NewTx(ctx, DefaultTxOptions().WithReadOnly(true))
 		if err != nil {
 			return nil, err
 		}
 		defer qtx.Cancel()
 	}
 
-	return qtx.catalog, nil
+	return qtx.Catalog(), nil
 }
 
-func (e *Engine) InferParameters(sql string, tx *SQLTx) (params map[string]SQLValueType, err error) {
-	stmts, err := Parse(strings.NewReader(sql))
+func (e *Engine) InferParameters(ctx context.Context, tx *SQLTx, sql string) (params map[string]SQLValueType, err error) {
+	stmts, err := ParseSQL(strings.NewReader(sql))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrParsingError, err)
 	}
-
-	return e.InferParametersPreparedStmts(stmts, tx)
+	return e.InferParametersPreparedStmts(ctx, tx, stmts)
 }
 
-func (e *Engine) InferParametersPreparedStmts(stmts []SQLStmt, tx *SQLTx) (params map[string]SQLValueType, err error) {
+func (e *Engine) InferParametersPreparedStmts(ctx context.Context, tx *SQLTx, stmts []SQLStmt) (params map[string]SQLValueType, err error) {
 	if len(stmts) == 0 {
 		return nil, ErrIllegalArguments
 	}
@@ -1328,7 +681,7 @@ func (e *Engine) InferParametersPreparedStmts(stmts []SQLStmt, tx *SQLTx) (param
 	qtx := tx
 
 	if qtx == nil {
-		qtx, err = e.NewTx(context.Background())
+		qtx, err = e.NewTx(ctx, DefaultTxOptions().WithReadOnly(true))
 		if err != nil {
 			return nil, err
 		}
@@ -1338,11 +691,66 @@ func (e *Engine) InferParametersPreparedStmts(stmts []SQLStmt, tx *SQLTx) (param
 	params = make(map[string]SQLValueType)
 
 	for _, stmt := range stmts {
-		err = stmt.inferParameters(qtx, params)
+		err = stmt.inferParameters(ctx, qtx, params)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	return params, nil
+}
+
+func normalizeParams(params map[string]interface{}) (map[string]interface{}, error) {
+	nparams := make(map[string]interface{}, len(params))
+
+	for name, value := range params {
+		nname := strings.ToLower(name)
+
+		_, exists := nparams[nname]
+		if exists {
+			return nil, ErrDuplicatedParameters
+		}
+
+		nparams[nname] = value
+	}
+
+	return nparams, nil
+}
+
+// CopyCatalogToTx copies the current sql catalog to the ongoing transaction.
+func (e *Engine) CopyCatalogToTx(ctx context.Context, tx *store.OngoingTx) error {
+	if tx == nil {
+		return ErrIllegalArguments
+	}
+
+	catalog := newCatalog(e.prefix)
+
+	err := catalog.addSchemaToTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (e *Engine) GetStore() *store.ImmuStore {
+	return e.store
+}
+
+func (e *Engine) GetPrefix() []byte {
+	return e.prefix
+}
+
+func (e *Engine) tableResolveFor(tableName string) TableResolver {
+	if e.tableResolvers == nil {
+		return nil
+	}
+	return e.tableResolvers[tableName]
+}
+
+func (e *Engine) registerTableResolver(tableName string, r TableResolver) {
+	if e.tableResolvers == nil {
+		e.tableResolvers = make(map[string]TableResolver)
+	}
+	e.tableResolvers[tableName] = r
 }

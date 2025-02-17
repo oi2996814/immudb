@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,37 +26,36 @@ import (
 )
 
 func TestJointRowReader(t *testing.T) {
-	st, err := store.Open(t.TempDir(), store.DefaultOptions())
+	st, err := store.Open(t.TempDir(), store.DefaultOptions().WithMultiIndexing(true))
 	require.NoError(t, err)
 
 	engine, err := NewEngine(st, DefaultOptions().WithPrefix(sqlPrefix))
 	require.NoError(t, err)
 
 	_, err = newJointRowReader(nil, nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
-	tx, err := engine.NewTx(context.Background())
+	tx, err := engine.NewTx(context.Background(), DefaultTxOptions())
 	require.NoError(t, err)
 
-	db, err := tx.catalog.newDatabase(1, "db1")
+	_, _, err = engine.Exec(context.Background(), tx, "CREATE TABLE table1(id INTEGER, number INTEGER, PRIMARY KEY id)", nil)
 	require.NoError(t, err)
 
-	err = tx.useDatabase("db1")
+	tx, err = engine.NewTx(context.Background(), DefaultTxOptions())
 	require.NoError(t, err)
 
-	table, err := db.newTable("table1", []*ColSpec{{colName: "id", colType: IntegerType}, {colName: "number", colType: IntegerType}})
-	require.NoError(t, err)
+	defer tx.Cancel()
 
-	index, err := table.newIndex(true, []uint32{1})
-	require.NoError(t, err)
-	require.NotNil(t, index)
-	require.Equal(t, table.primaryIndex, index)
+	table := tx.catalog.tables[0]
 
 	r, err := newRawRowReader(tx, nil, table, period{}, "", &ScanSpecs{Index: table.primaryIndex})
 	require.NoError(t, err)
 
+	_, err = newJointRowReader(r, []*JoinSpec{{joinType: RightJoin}})
+	require.ErrorIs(t, err, ErrUnsupportedJoinType)
+
 	_, err = newJointRowReader(r, []*JoinSpec{{joinType: LeftJoin}})
-	require.Equal(t, ErrUnsupportedJoinType, err)
+	require.NoError(t, err)
 
 	_, err = newJointRowReader(r, []*JoinSpec{{joinType: InnerJoin, ds: &SelectStmt{}}})
 	require.NoError(t, err)
@@ -70,7 +69,7 @@ func TestJointRowReader(t *testing.T) {
 	require.Equal(t, "id", orderBy[0].Column)
 	require.Equal(t, "table1", orderBy[0].Table)
 
-	cols, err := jr.Columns()
+	cols, err := jr.Columns(context.Background())
 	require.NoError(t, err)
 	require.Len(t, cols, 4)
 	require.Equal(t, cols[0].Table, "table1")
@@ -93,7 +92,7 @@ func TestJointRowReader(t *testing.T) {
 			jr, err = newJointRowReader(r, []*JoinSpec{{joinType: InnerJoin, ds: &tableRef{table: "table1"}}})
 			require.NoError(t, err)
 
-			_, err = jr.colsBySelector()
+			_, err = jr.colsBySelector(context.Background())
 			require.ErrorIs(t, err, ErrAmbiguousSelector)
 		})
 
@@ -102,7 +101,7 @@ func TestJointRowReader(t *testing.T) {
 				rowReader: &dummyRowReader{},
 			}
 
-			cols, err := jr.colsBySelector()
+			cols, err := jr.colsBySelector(context.Background())
 			require.ErrorIs(t, err, errDummy)
 			require.Nil(t, cols)
 		})
@@ -114,11 +113,11 @@ func TestJointRowReader(t *testing.T) {
 				},
 			}
 
-			err := jr.InferParameters(make(map[string]SQLValueType))
+			err := jr.InferParameters(context.Background(), make(map[string]SQLValueType))
 			require.ErrorIs(t, err, errDummy)
 
 			jr.rowReader.(*dummyRowReader).failInferringParams = false
-			err = jr.InferParameters(make(map[string]SQLValueType))
+			err = jr.InferParameters(context.Background(), make(map[string]SQLValueType))
 			require.ErrorIs(t, err, errDummy)
 		})
 
@@ -130,7 +129,7 @@ func TestJointRowReader(t *testing.T) {
 				},
 			}
 
-			cols, err := jr.Columns()
+			cols, err := jr.Columns(context.Background())
 			require.ErrorIs(t, err, errDummy)
 			require.Nil(t, cols)
 		})
@@ -140,13 +139,13 @@ func TestJointRowReader(t *testing.T) {
 
 			jr, err := newJointRowReader(r,
 				[]*JoinSpec{{joinType: InnerJoin, ds: &dummyDataSource{
-					ResolveFunc: func(tx *SQLTx, params map[string]interface{}, ScanSpecs *ScanSpecs) (RowReader, error) {
+					ResolveFunc: func(ctx context.Context, tx *SQLTx, params map[string]interface{}, ScanSpecs *ScanSpecs) (RowReader, error) {
 						return nil, injectedErr
 					},
 				}}})
 			require.NoError(t, err)
 
-			cols, err := jr.colsBySelector()
+			cols, err := jr.colsBySelector(context.Background())
 			require.ErrorIs(t, err, injectedErr)
 			require.Nil(t, cols)
 		})
@@ -155,13 +154,13 @@ func TestJointRowReader(t *testing.T) {
 
 			jr, err := newJointRowReader(r,
 				[]*JoinSpec{{joinType: InnerJoin, ds: &dummyDataSource{
-					ResolveFunc: func(tx *SQLTx, params map[string]interface{}, ScanSpecs *ScanSpecs) (RowReader, error) {
+					ResolveFunc: func(ctx context.Context, tx *SQLTx, params map[string]interface{}, ScanSpecs *ScanSpecs) (RowReader, error) {
 						return &dummyRowReader{}, nil
 					},
 				}}})
 			require.NoError(t, err)
 
-			cols, err := jr.colsBySelector()
+			cols, err := jr.colsBySelector(context.Background())
 			require.ErrorIs(t, err, errDummy)
 			require.Nil(t, cols)
 		})

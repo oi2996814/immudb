@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -95,7 +95,7 @@ func TestMultiApp(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestMultiApOffsetAndLRUCacheEviction(t *testing.T) {
+func TestMultiApOffsetAndCacheEviction(t *testing.T) {
 	a, err := Open(t.TempDir(), DefaultOptions().WithFileSize(1).WithMaxOpenedFiles(1))
 	require.NoError(t, err)
 
@@ -191,7 +191,10 @@ func TestMultiAppReOpening(t *testing.T) {
 	err = a.Close()
 	require.NoError(t, err)
 
-	a, err = Open(copyPath, DefaultOptions().WithReadOnly(true))
+	a, err = Open(copyPath, DefaultOptions())
+	require.NoError(t, err)
+
+	err = a.SwitchToReadOnlyMode()
 	require.NoError(t, err)
 
 	sz, err := a.Size()
@@ -211,6 +214,9 @@ func TestMultiAppReOpening(t *testing.T) {
 	require.ErrorIs(t, err, ErrReadOnly)
 
 	err = a.Flush()
+	require.ErrorIs(t, err, ErrReadOnly)
+
+	err = a.SwitchToReadOnlyMode()
 	require.ErrorIs(t, err, ErrReadOnly)
 
 	err = a.Sync()
@@ -242,8 +248,7 @@ func TestMultiAppEdgeCases(t *testing.T) {
 	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	err = a.Copy("multi_app_test.go")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not a directory")
+	require.ErrorContains(t, err, "not a directory")
 
 	err = a.Close()
 	require.NoError(t, err)
@@ -264,6 +269,9 @@ func TestMultiAppEdgeCases(t *testing.T) {
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = a.Flush()
+	require.ErrorIs(t, err, ErrAlreadyClosed)
+
+	err = a.SwitchToReadOnlyMode()
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = a.Sync()

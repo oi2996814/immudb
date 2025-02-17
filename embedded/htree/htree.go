@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,20 +43,20 @@ type InclusionProof struct {
 }
 
 func New(maxWidth int) (*HTree, error) {
-	if maxWidth < 1 {
-		return nil, ErrIllegalArguments
-	}
+	var levels [][][sha256.Size]byte
 
-	lw := 1
-	for lw < maxWidth {
-		lw = lw << 1
-	}
+	if maxWidth > 0 {
+		lw := 1
+		for lw < maxWidth {
+			lw = lw << 1
+		}
 
-	height := bits.Len64(uint64(maxWidth-1)) + 1
+		height := bits.Len64(uint64(maxWidth-1)) + 1
 
-	levels := make([][][sha256.Size]byte, height)
-	for l := 0; l < height; l++ {
-		levels[l] = make([][sha256.Size]byte, lw>>l)
+		levels = make([][][sha256.Size]byte, height)
+		for l := 0; l < height; l++ {
+			levels[l] = make([][sha256.Size]byte, lw>>l)
+		}
 	}
 
 	return &HTree{
@@ -71,7 +71,9 @@ func (t *HTree) BuildWith(digests [][sha256.Size]byte) error {
 	}
 
 	if len(digests) == 0 {
-		return ErrIllegalArguments
+		t.width = 0
+		t.root = sha256.Sum256(nil)
+		return nil
 	}
 
 	for i, d := range digests {
@@ -110,12 +112,8 @@ func (t *HTree) BuildWith(digests [][sha256.Size]byte) error {
 	return nil
 }
 
-func (t *HTree) Root() (root [sha256.Size]byte, err error) {
-	if t.width == 0 {
-		err = ErrIllegalState
-		return
-	}
-	return t.root, nil
+func (t *HTree) Root() [sha256.Size]byte {
+	return t.root
 }
 
 // InclusionProof returns the shortest list of additional nodes required to compute the root

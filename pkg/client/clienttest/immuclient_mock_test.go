@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,6 +35,7 @@ func TestImmuClientMock(t *testing.T) {
 	errLogout := errors.New("LogoutF got called")
 	errVerifiedGet := errors.New("VerifiedGetF got called")
 	errVerifiedSet := errors.New("VerifiedSetF got called")
+	errVerifiableGet := errors.New("VerifiableGetF got called")
 	errSet := errors.New("SetF got called")
 	errVerifiedReference := errors.New("VerifiedReferenceF got called")
 	errVerifiedZAdd := errors.New("VerifiedZAddF got called")
@@ -66,7 +67,13 @@ func TestImmuClientMock(t *testing.T) {
 		VerifiedSetF: func(context.Context, []byte, []byte) (*schema.TxHeader, error) {
 			return nil, errVerifiedSet
 		},
+		VerifiableGetF: func(ctx context.Context, in *schema.VerifiableGetRequest, opts ...grpc.CallOption) (*schema.VerifiableEntry, error) {
+			return nil, errVerifiableGet
+		},
 		SetF: func(context.Context, []byte, []byte) (*schema.TxHeader, error) {
+			return nil, errSet
+		},
+		SetAllF: func(context.Context, *schema.SetRequest) (*schema.TxHeader, error) {
 			return nil, errSet
 		},
 		VerifiedSetReferenceF: func(context.Context, []byte, []byte, uint64) (*schema.TxHeader, error) {
@@ -84,37 +91,44 @@ func TestImmuClientMock(t *testing.T) {
 	}
 	require.True(t, icm.IsConnected())
 
-	require.Equal(t, errWaitForHealthCheck, icm.WaitForHealthCheck(context.TODO()))
-	_, err := icm.Connect(context.TODO())
+	err := icm.WaitForHealthCheck(context.Background())
+	require.ErrorIs(t, err, errWaitForHealthCheck)
 
-	require.Equal(t, errConnect, err)
+	_, err = icm.Connect(context.Background())
+	require.ErrorIs(t, err, errConnect)
+
 	err = icm.Disconnect()
+	require.ErrorIs(t, err, errDisconnect)
 
-	require.Equal(t, errDisconnect, err)
-	_, err = icm.Login(context.TODO(), nil, nil)
+	_, err = icm.Login(context.Background(), nil, nil)
+	require.ErrorIs(t, err, errLogin)
 
-	require.Equal(t, errLogin, err)
+	require.ErrorIs(t, errLogout, icm.Logout(context.Background()))
 
-	require.Equal(t, errLogout, icm.Logout(context.TODO()))
-	_, err = icm.VerifiedGet(context.TODO(), nil)
+	_, err = icm.VerifiedGet(context.Background(), nil)
+	require.ErrorIs(t, err, errVerifiedGet)
 
-	require.Equal(t, errVerifiedGet, err)
-	_, err = icm.VerifiedSet(context.TODO(), nil, nil)
+	_, err = icm.VerifiedSet(context.Background(), nil, nil)
+	require.ErrorIs(t, err, errVerifiedSet)
 
-	require.Equal(t, errVerifiedSet, err)
-	_, err = icm.Set(context.TODO(), nil, nil)
+	_, err = icm.VerifiableGet(context.Background(), nil, nil)
+	require.ErrorIs(t, err, errVerifiableGet)
 
-	require.Equal(t, errSet, err)
-	_, err = icm.VerifiedSetReference(context.TODO(), nil, nil)
+	_, err = icm.Set(context.Background(), nil, nil)
+	require.ErrorIs(t, err, errSet)
 
-	require.Equal(t, errVerifiedReference, err)
-	_, err = icm.VerifiedZAdd(context.TODO(), nil, 0., nil)
+	_, err = icm.SetAll(context.Background(), nil)
+	require.ErrorIs(t, err, errSet)
 
-	require.Equal(t, errVerifiedZAdd, err)
-	_, err = icm.History(context.TODO(), nil)
+	_, err = icm.VerifiedSetReference(context.Background(), nil, nil)
+	require.ErrorIs(t, err, errVerifiedReference)
 
-	require.Equal(t, errHistory, err)
+	_, err = icm.VerifiedZAdd(context.Background(), nil, 0., nil)
+	require.ErrorIs(t, err, errVerifiedZAdd)
 
-	_, err = icm.CreateDatabaseV2(context.TODO(), "", nil)
-	require.Equal(t, errCreateDatabase, err)
+	_, err = icm.History(context.Background(), nil)
+	require.ErrorIs(t, err, errHistory)
+
+	_, err = icm.CreateDatabaseV2(context.Background(), "", nil)
+	require.ErrorIs(t, err, errCreateDatabase)
 }

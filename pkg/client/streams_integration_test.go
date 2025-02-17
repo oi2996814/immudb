@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -37,7 +36,7 @@ import (
 func externalImmudbClient(t *testing.T) (*immuClient, context.Context) {
 	extImmudb := os.Getenv("TEST_EXTERNAL_IMMUDB")
 	if extImmudb == "" {
-		t.Skip(fmt.Sprintf("Please launch an immudb server and set TEST_EXTERNAL_IMMUDB to its <host:port> value"))
+		t.Skip("Please launch an immudb server and set TEST_EXTERNAL_IMMUDB to its <host:port> value")
 	}
 
 	s := strings.SplitN(extImmudb, ":", 2)
@@ -97,7 +96,7 @@ func TestImmuServer_SimpleSetGetManagedStream(t *testing.T) {
 	s, err := cli.streamSet(ctx)
 	require.NoError(t, err)
 
-	kvss := stream.NewKvStreamSender(stream.NewMsgSender(s, cli.Options.StreamChunkSize))
+	kvss := stream.NewKvStreamSender(stream.NewMsgSender(s, make([]byte, cli.Options.StreamChunkSize)))
 
 	err = kvss.Send(kvs[0])
 	require.NoError(t, err)
@@ -113,7 +112,7 @@ func TestImmuServer_MultiSetGetManagedStream(t *testing.T) {
 	s1, err := cli.streamSet(ctx)
 	require.NoError(t, err)
 
-	kvs := stream.NewKvStreamSender(stream.NewMsgSender(s1, cli.Options.StreamChunkSize))
+	kvs := stream.NewKvStreamSender(stream.NewMsgSender(s1, make([]byte, cli.Options.StreamChunkSize)))
 
 	key := []byte("key1")
 	val := []byte("val1")
@@ -139,7 +138,7 @@ func TestImmuServer_MultiSetGetManagedStream(t *testing.T) {
 	s2, err := cli.streamSet(ctx)
 	require.NoError(t, err)
 
-	kvs2 := stream.NewKvStreamSender(stream.NewMsgSender(s2, cli.Options.StreamChunkSize))
+	kvs2 := stream.NewKvStreamSender(stream.NewMsgSender(s2, make([]byte, cli.Options.StreamChunkSize)))
 
 	key2 := []byte("key2")
 	val2 := []byte("val2")
@@ -165,7 +164,7 @@ func TestImmuServer_MultiSetGetManagedStream(t *testing.T) {
 	s3, err := cli.streamSet(ctx)
 	require.NoError(t, err)
 
-	kvs3 := stream.NewKvStreamSender(stream.NewMsgSender(s3, cli.Options.StreamChunkSize))
+	kvs3 := stream.NewKvStreamSender(stream.NewMsgSender(s3, make([]byte, cli.Options.StreamChunkSize)))
 
 	key3 := []byte("key3")
 	val3 := []byte("val3")

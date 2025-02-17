@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Setup runner for Go
-      uses: actions/setup-go@v3
+      uses: actions/setup-go@v5
       with:
         go-version: "1.18"
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Build stress tool
       run: |
         go build embedded/tools/stress_tool/stress_tool.go
@@ -22,31 +22,38 @@ jobs:
       id: e_1m_w_20_b_1k_bs_50
       run: |
         rm -rf data
+        SECONDS=0
         ./stress_tool -mode auto -committers 20 -kvCount 1000 -txCount 50 -txRead -synced
+        echo "duration_1=$SECONDS" >> $GITHUB_ENV
     - name: "| Entries: 1M | Workers: 50  | Batch: 1k | Batches: 20 |"
       id: e_1m_w_50_b_1k_bs_20
       run: |
         rm -rf data
+        SECONDS=0
         ./stress_tool -mode auto -committers 50 -kvCount 1000 -txCount 20 -txRead -synced
+        echo "duration_2=$SECONDS" >> $GITHUB_ENV
     - name: "| Entries: 1M | Workers: 100 | Batch: 1k | Batches: 10 |"
       id: e_1m_w_100_b_1k_bs_10
       run: |
         rm -rf data
+        SECONDS=0
         ./stress_tool -mode auto -committers 100 -kvCount 1000 -txCount 10 -txRead -synced
+        echo "duration_3=$SECONDS" >> $GITHUB_ENV
     - name: Create the Mattermost message
       if: github.event.schedule == '0 0 * * *'
       run: >
-        echo "{\"text\":\"### Stress tests results for scheduled daily run on branch ${{ github.ref_name }}\n
-        | Step | Result |\n
-        | ---- | ------ |\n
-        | Entries: 1M - Workers: 20 - Batch: 1k - Batches: 50 | ${{ steps.e_1m_w_20_b_1k_bs_50.outcome }} |\n
-        | Entries: 1M - Workers: 50 - Batch: 1k - Batches: 20 | ${{ steps.e_1m_w_50_b_1k_bs_20.outcome }} |\n
-        | Entries: 1M - Workers: 100 - Batch: 1k - Batches: 10 | ${{ steps.e_1m_w_100_b_1k_bs_10.outcome }} |\n
+        echo "{\"text\":\"### Stress tests results for scheduled daily run on ${{ github.ref_name }} branch\n
+        | Step | Result | Duration |\n
+        | ---- | ------ | -------- |\n
+        | Entries: 1M - Workers: 20 - Batch: 1k - Batches: 50 | ${{ steps.e_1m_w_20_b_1k_bs_50.outcome }} | ${{ env.duration_1 }}s |\n
+        | Entries: 1M - Workers: 50 - Batch: 1k - Batches: 20 | ${{ steps.e_1m_w_50_b_1k_bs_20.outcome }} | ${{ env.duration_2 }}s |\n
+        | Entries: 1M - Workers: 100 - Batch: 1k - Batches: 10 | ${{ steps.e_1m_w_100_b_1k_bs_10.outcome }} | ${{ env.duration_3 }}s |\n
         **Check details [here](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})**
-        \"}" > mattermost.json
+        \"}" > mattermost.json && echo MM_PAYLOAD=$(cat mattermost.json) >> $GITHUB_ENV
     - name: Notify on immudb channel on Mattermost
       if: github.event.schedule == '0 0 * * *'
       uses: mattermost/action-mattermost-notify@master
-      env:
+      with:
         MATTERMOST_WEBHOOK_URL: ${{ secrets.MATTERMOST_WEBHOOK_URL }}
-        MATTERMOST_CHANNEL: 'immudb'
+        MATTERMOST_CHANNEL: 'immudb-tests'
+        PAYLOAD: ${{ env.MM_PAYLOAD }}

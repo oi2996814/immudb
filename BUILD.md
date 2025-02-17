@@ -14,10 +14,10 @@ make WEBCONSOLE=default
 ```
 
 This will download the appropriate webconsole release and add the Go build tag `webconsole`
-which will use the *statik* library to embed the front-end code.
+which will use the go:embed to embed the front-end code.
 The front-end will be then served in the web API root "/".
 
-The webconsole generation will override the default page statik.go. To regenerate the default page, change the files in webconsole/default and run `make webconsole/default`
+To regenerate the default page, change the files in webconsole/default and run `make webconsole/default`
 
 ## Linux (by component)
 
@@ -26,6 +26,7 @@ GOOS=linux GOARCH=amd64 make immuclient-static immuadmin-static immudb-static
 ```
 
 ## MacOS (by component)
+For Apple Silicon (M1) use `GOARCH=arm64` instead of `GOARCH=amd64`
 
 ```bash
 GOOS=darwin GOARCH=amd64 make immuclient-static immuadmin-static immudb-static

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -36,7 +35,7 @@ func TestClientUnaryInterceptor(t *testing.T) {
 		return nil
 	}
 	err := f(context.Background(), "", "", "", nil, invoker)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }
 
 func TestClientStreamInterceptor(t *testing.T) {
@@ -48,5 +47,5 @@ func TestClientStreamInterceptor(t *testing.T) {
 		return nil, nil
 	}
 	_, err := f(context.Background(), nil, nil, "", streamer)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 }

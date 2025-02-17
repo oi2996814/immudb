@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,6 +25,7 @@ import (
 
 	c "github.com/codenotary/immudb/cmd/helper"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // AdminTokenFileSuffix is the suffix used for the token file name
@@ -59,27 +60,30 @@ type Options struct {
 	StreamChunkSize     int    // Maximum size of a data chunk in bytes for streaming operations (directly affects maximum GRPC packet size)
 
 	HeartBeatFrequency time.Duration // Duration between two consecutive heartbeat calls to the server for session heartbeats
+
+	DisableIdentityCheck bool // Do not validate server's identity
 }
 
 // DefaultOptions ...
 func DefaultOptions() *Options {
 	return &Options{
-		Dir:                 ".",
-		Address:             "127.0.0.1",
-		Port:                3322,
-		HealthCheckRetries:  5,
-		MTLs:                false,
-		Auth:                true,
-		MaxRecvMsgSize:      4 * 1024 * 1024, //4Mb
-		Config:              "configs/immuclient.toml",
-		DialOptions:         []grpc.DialOption{grpc.WithInsecure()},
-		PasswordReader:      c.DefaultPasswordReader,
-		Metrics:             true,
-		PidPath:             "",
-		LogFileName:         "",
-		ServerSigningPubKey: "",
-		StreamChunkSize:     stream.DefaultChunkSize,
-		HeartBeatFrequency:  time.Minute * 1,
+		Dir:                  ".",
+		Address:              "127.0.0.1",
+		Port:                 3322,
+		HealthCheckRetries:   5,
+		MTLs:                 false,
+		Auth:                 true,
+		MaxRecvMsgSize:       4 * 1024 * 1024, //4Mb
+		Config:               "configs/immuclient.toml",
+		DialOptions:          []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
+		PasswordReader:       c.DefaultPasswordReader,
+		Metrics:              true,
+		PidPath:              "",
+		LogFileName:          "",
+		ServerSigningPubKey:  "",
+		StreamChunkSize:      stream.DefaultChunkSize,
+		HeartBeatFrequency:   time.Minute * 1,
+		DisableIdentityCheck: false,
 	}
 }
 
@@ -174,6 +178,11 @@ func (o *Options) Bind() string {
 	return o.Address + ":" + strconv.Itoa(o.Port)
 }
 
+// Identity returns server's identity
+func (o *Options) ServerIdentity() string {
+	return o.Bind()
+}
+
 // WithPasswordReader sets the password reader for the client
 func (o *Options) WithPasswordReader(pr c.PasswordReader) *Options {
 	o.PasswordReader = pr
@@ -213,6 +222,21 @@ func (o *Options) WithStreamChunkSize(streamChunkSize int) *Options {
 // WithHeartBeatFrequency set the keep alive message frequency
 func (o *Options) WithHeartBeatFrequency(heartBeatFrequency time.Duration) *Options {
 	o.HeartBeatFrequency = heartBeatFrequency
+	return o
+}
+
+// WithDisableIdentityCheck disables or enables server identity check.
+//
+// Each server identifies itself with a unique UUID which along with the database name
+// is used to identify a particular immudb database instance. This UUID+database name tuple
+// is then used to select appropriate state value stored on the client side to do proof verifications.
+//
+// Identity check is responsible for ensuring that the server with given identity
+// (which is currently the "host:port" string) must always present with the same UUID.
+//
+// Disabling this check means that the server can present different UUID.
+func (o *Options) WithDisableIdentityCheck(disableIdentityCheck bool) *Options {
+	o.DisableIdentityCheck = disableIdentityCheck
 	return o
 }
 

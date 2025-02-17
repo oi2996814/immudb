@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,7 +40,7 @@ func (s *ImmuServer) StreamGet(kr *schema.KeyRequest, str schema.ImmuService_Str
 
 	kvsr := s.StreamServiceFactory.NewKvStreamSender(s.StreamServiceFactory.NewMsgSender(str))
 
-	entry, err := db.Get(kr)
+	entry, err := db.Get(str.Context(), kr)
 	if err != nil {
 		return err
 	}
@@ -100,15 +100,15 @@ func (s *ImmuServer) StreamSet(str schema.ImmuService_StreamSetServer) error {
 		kvs = append(kvs, &schema.KeyValue{Key: key, Value: value})
 	}
 
-	txMeta, err := db.Set(&schema.SetRequest{KVs: kvs})
-	if err == store.ErrorMaxValueLenExceeded {
+	txhdr, err := db.Set(str.Context(), &schema.SetRequest{KVs: kvs})
+	if err == store.ErrMaxValueLenExceeded {
 		return errors.Wrap(err, stream.ErrMaxValueLenExceeded)
 	}
 	if err != nil {
 		return status.Errorf(codes.Unknown, "StreamSet receives following error: %s", err.Error())
 	}
 
-	err = str.SendAndClose(txMeta)
+	err = str.SendAndClose(txhdr)
 	if err != nil {
 		return err
 	}
@@ -125,7 +125,7 @@ func (s *ImmuServer) StreamVerifiableGet(req *schema.VerifiableGetRequest, str s
 
 	vess := s.StreamServiceFactory.NewVEntryStreamSender(s.StreamServiceFactory.NewMsgSender(str))
 
-	vEntry, err := db.VerifiableGet(req)
+	vEntry, err := db.VerifiableGet(str.Context(), req)
 	if err != nil {
 		return err
 	}
@@ -255,14 +255,12 @@ func (s *ImmuServer) StreamVerifiableSet(str schema.ImmuService_StreamVerifiable
 		SetRequest:   &schema.SetRequest{KVs: kvs},
 		ProveSinceTx: proveSinceTx,
 	}
-	verifiableTx, err := db.VerifiableSet(&vSetReq)
-	if err == store.ErrorMaxValueLenExceeded {
+	verifiableTx, err := db.VerifiableSet(str.Context(), &vSetReq)
+	if err == store.ErrMaxValueLenExceeded {
 		return errors.Wrap(err, stream.ErrMaxValueLenExceeded).WithCode(errors.CodDataException)
 	}
 	if err != nil {
-		return status.Errorf(
-			codes.Unknown,
-			"StreamVerifiableSet received the following error: %s", err.Error())
+		return status.Errorf(codes.Unknown, "StreamVerifiableSet received the following error: %s", err.Error())
 	}
 
 	if s.StateSigner != nil {
@@ -297,7 +295,7 @@ func (s *ImmuServer) StreamScan(req *schema.ScanRequest, str schema.ImmuService_
 		return err
 	}
 
-	r, err := db.Scan(req)
+	r, err := db.Scan(str.Context(), req)
 	if err != nil {
 		return err
 	}
@@ -332,7 +330,7 @@ func (s *ImmuServer) StreamZScan(request *schema.ZScanRequest, server schema.Imm
 		return err
 	}
 
-	r, err := db.ZScan(request)
+	r, err := db.ZScan(server.Context(), request)
 	if err != nil {
 		return err
 	}
@@ -342,14 +340,12 @@ func (s *ImmuServer) StreamZScan(request *schema.ZScanRequest, server schema.Imm
 	for _, e := range r.Entries {
 		scoreBs, err := stream.NumberToBytes(e.Score)
 		if err != nil {
-			s.Logger.Errorf(
-				"StreamZScan error: could not convert score %f to bytes: %v", e.Score, err)
+			s.Logger.Errorf("StreamZScan error: could not convert score %f to bytes: %v", e.Score, err)
 		}
 
 		atTxBs, err := stream.NumberToBytes(e.AtTx)
 		if err != nil {
-			s.Logger.Errorf(
-				"StreamZScan error: could not convert atTx %d to bytes: %v", e.AtTx, err)
+			s.Logger.Errorf("StreamZScan error: could not convert atTx %d to bytes: %v", e.AtTx, err)
 		}
 
 		ze := &stream.ZEntry{
@@ -389,7 +385,7 @@ func (s *ImmuServer) StreamHistory(request *schema.HistoryRequest, server schema
 		return err
 	}
 
-	r, err := db.History(request)
+	r, err := db.History(server.Context(), request)
 	if err != nil {
 		return err
 	}
@@ -467,12 +463,12 @@ func (s *ImmuServer) StreamExecAll(str schema.ImmuService_StreamExecAllServer) e
 		}
 	}
 
-	txMeta, err := db.ExecAll(&schema.ExecAllRequest{Operations: sops})
+	txhdr, err := db.ExecAll(str.Context(), &schema.ExecAllRequest{Operations: sops})
 	if err != nil {
 		return err
 	}
 
-	err = str.SendAndClose(txMeta)
+	err = str.SendAndClose(txhdr)
 	if err != nil {
 		return err
 	}

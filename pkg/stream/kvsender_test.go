@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,6 @@ limitations under the License.
 package stream
 
 import (
-	"errors"
 	"io"
 	"testing"
 
@@ -27,7 +26,7 @@ import (
 
 func TestNewKvStreamSender(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
-	s := NewMsgSender(sm, 4096)
+	s := NewMsgSender(sm, make([]byte, 4096))
 	kvss := NewKvStreamSender(s)
 	require.IsType(t, &kvStreamSender{}, kvss)
 }
@@ -56,11 +55,11 @@ func TestKvStreamSender_SendEOF(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
 
 	s := streamtest.DefaultMsgSenderMock(sm, 4096)
-	s.SendF = func(reader io.Reader, payloadSize int) (err error) {
+	s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
 		return io.EOF
 	}
 	s.RecvMsgF = func(m interface{}) error {
-		return errors.New(ErrNotEnoughDataOnStream)
+		return io.EOF
 	}
 	kvss := NewKvStreamSender(s)
 	kv := &KeyValue{
@@ -75,16 +74,15 @@ func TestKvStreamSender_SendEOF(t *testing.T) {
 	}
 
 	err := kvss.Send(kv)
-
-	require.Equal(t, ErrNotEnoughDataOnStream, err.Error())
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestKvStreamSender_SendErr(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
 
 	s := streamtest.DefaultMsgSenderMock(sm, 4096)
-	s.SendF = func(reader io.Reader, payloadSize int) (err error) {
-		return errors.New("custom one")
+	s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
+		return errCustom
 	}
 
 	kvss := NewKvStreamSender(s)
@@ -101,5 +99,5 @@ func TestKvStreamSender_SendErr(t *testing.T) {
 
 	err := kvss.Send(kv)
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 }

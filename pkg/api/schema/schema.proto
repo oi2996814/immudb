@@ -25,6 +25,7 @@ import "protoc-gen-swagger/options/annotations.proto";
 
 option go_package = "github.com/codenotary/immudb/pkg/api/schema";
 option (grpc.gateway.protoc_gen_swagger.options.openapiv2_swagger) = {
+  base_path: "/api",
   info: {
     title: "immudb REST API";
     description: "<b>IMPORTANT</b>: All <code>get</code> and <code>safeget</code> functions return <u>base64-encoded</u> keys and values, while all <code>set</code> and <code>safeset</code> functions expect <u>base64-encoded</u> inputs."
@@ -74,6 +75,17 @@ message User {
 
   // Flag indicating whether the user is active or not
   bool active = 6;
+
+  // List of SQL privileges
+  repeated SQLPrivilege sqlPrivileges = 7;
+}
+
+message SQLPrivilege {
+  // Database name
+  string database = 1;
+
+  // Privilege: SELECT, CREATE, INSERT, UPDATE, DELETE, DROP, ALTER
+  string privilege = 2;
 }
 
 message UserList {
@@ -161,14 +173,14 @@ message OpenSessionResponse {
 message Precondition {
   // Only succeed if given key exists
   message KeyMustExistPrecondition {
-	// key to check
-    bytes key = 1; 
+    // key to check
+    bytes key = 1;
   }
 
   // Only succeed if given key does not exists
   message KeyMustNotExistPrecondition {
-	// key to check
-    bytes key = 1; 
+    // key to check
+    bytes key = 1;
   }
 
   // Only succeed if given key was not modified after given transaction
@@ -306,7 +318,7 @@ message ScanRequest {
   // indexed, newer transaction may still be pending
   uint64 sinceTx = 5;
 
-  // If set to true, do not wait for indexing to be done before finishing this call
+  // Deprecated: If set to true, do not wait for indexing to be done before finishing this call
   bool noWait = 6;
 
   // If set to true, results will include seekKey
@@ -365,7 +377,12 @@ message TxHeader {
 }
 
 // TxMetadata contains metadata set to whole transaction
-message TxMetadata {}
+message TxMetadata {
+  // Entry expiration information
+  uint64 truncatedTxID = 1;
+  // Extra data
+  bytes extra = 2;
+}
 
 // LinearProof contains the linear part of the proof (outside the main Merkle Tree)
 message LinearProof {
@@ -377,6 +394,16 @@ message LinearProof {
 
   // List of terms (inner hashes of transaction entries)
   repeated bytes terms = 3;
+}
+
+// LinearAdvanceProof contains the proof of consistency between the consumed part of the older linear chain
+// and the new Merkle Tree
+message LinearAdvanceProof {
+  // terms for the linear chain
+  repeated bytes linearProofTerms = 1;
+
+  // inclusion proofs for steps on the linear chain
+  repeated InclusionProof inclusionProofs = 2;
 }
 
 // DualProof contains inclusion and consistency proofs for dual Merkle-Tree + Linear proofs
@@ -401,6 +428,24 @@ message DualProof {
 
   // Linear proof starting from targetBlTxAlh to the final state value
   LinearProof linearProof = 7;
+
+  // Proof of consistency between some part of older linear chain and newer Merkle Tree
+  LinearAdvanceProof LinearAdvanceProof = 8;
+}
+
+// DualProofV2 contains inclusion and consistency proofs
+message DualProofV2 {
+  // Header of the source (earlier) transaction
+  TxHeader sourceTxHeader = 1;
+
+  // Header of the target (latter) transaction
+  TxHeader targetTxHeader = 2;
+
+  // Inclusion proof of the source transaction hash in the main Merkle Tree
+  repeated bytes inclusionProof = 3;
+
+  // Consistency proof between Merkle Trees in the source and target transactions
+  repeated bytes consistencyProof = 4;
 }
 
 message Tx {
@@ -457,6 +502,17 @@ message VerifiableTx {
 
   // Proof for the transaction
   DualProof dualProof = 2;
+
+  // Signature for the new state value
+  Signature signature = 3;
+}
+
+message VerifiableTxV2 {
+  // Transaction to verify
+  Tx tx = 1;
+
+  // Proof for the transaction
+  DualProofV2 dualProof = 2;
 
   // Signature for the new state value
   Signature signature = 3;
@@ -560,6 +616,18 @@ message ServerInfoRequest {}
 message ServerInfoResponse {
   // The version of the server instance.
   string version = 1;
+
+  // Unix timestamp (seconds) indicating when the server process has been started.
+  int64 startedAt = 2;
+
+  // Total number of transactions across all databases.
+  int64 numTransactions = 3;
+
+  // Total number of databases present.
+  int32 numDatabases = 4;
+
+  // Total disk size used by all databases.
+  int64 databasesDiskSize = 5;
 }
 
 message HealthResponse {
@@ -590,14 +658,14 @@ message ImmutableState {
 
   // Signature of the hash
   Signature signature = 4;
-	
+
   // following fields are not part of the signature
 
   // Id of the most recent precommitted transaction
-	uint64 precommittedTxId = 5;
+  uint64 precommittedTxId = 5;
 
   // State of the most recent precommitted transaction
-	bytes precommittedTxHash = 6;
+  bytes precommittedTxHash = 6;
 }
 
 message ReferenceRequest {
@@ -689,7 +757,7 @@ message ZScanRequest {
   // entries up to sinceTx to be indexed
   uint64 sinceTx = 10;
 
-  // If set to true, do not wait for the indexer to be up to date
+  // Deprecated: If set to true, do not wait for the indexer to be up to date
   bool noWait = 11;
 
   // Specify the index of initial entry to be returned by excluding the initial
@@ -734,7 +802,7 @@ message TxRequest {
   // entries up to sinceTx to be indexed, will affect resolving references
   uint64 sinceTx = 3;
 
-  // If set to true, do not wait for the indexer to be up to date
+  // Deprecated: If set to true, do not wait for the indexer to be up to date
   bool noWait = 4;
 
   // If set to true, do not resolve references (avoid looking up final values if not needed)
@@ -786,7 +854,7 @@ message VerifiableTxRequest {
   // entries up to sinceTx to be indexed, will affect resolving references
   uint64 sinceTx = 4;
 
-  // If set to true, do not wait for the indexer to be up to date
+  // Deprecated: If set to true, do not wait for the indexer to be up to date
   bool noWait = 5;
 
   // If set to true, do not resolve references (avoid looking up final values if not needed)
@@ -810,7 +878,7 @@ message TxScanRequest {
   // entries up to sinceTx to be indexed, will affect resolving references
   uint64 sinceTx = 5;
 
-  // If set to true, do not wait for the indexer to be up to date
+  // Deprecated: If set to true, do not wait for the indexer to be up to date
   bool noWait = 6;
 }
 
@@ -821,19 +889,21 @@ message TxList {
 
 message ExportTxRequest {
   // Id of transaction to export
-	uint64 tx = 1;
+  uint64 tx = 1;
   // If set to true, non-committed transactions can be exported
-	bool allowPreCommitted = 2;
-  // Used on synchronous replication to notify the master about follower state
-	FollowerState followerState = 3;
+  bool allowPreCommitted = 2;
+  // Used on synchronous replication to notify the primary about replica state
+  ReplicaState replicaState = 3;
+  // If set to true, integrity checks are skipped when reading data
+  bool skipIntegrityCheck = 4;
 }
 
-message FollowerState {
-	string UUID = 1;
-	uint64 committedTxID = 2;
-	bytes  committedAlh = 3;
-	uint64 precommittedTxID = 4;
-	bytes  precommittedAlh = 5;
+message ReplicaState {
+  string UUID = 1;
+  uint64 committedTxID = 2;
+  bytes committedAlh = 3;
+  uint64 precommittedTxID = 4;
+  bytes precommittedAlh = 5;
 }
 
 message Database {
@@ -849,19 +919,19 @@ message DatabaseSettings {
   bool replica = 2;
 
   // Name of the database to replicate
-  string masterDatabase = 3;
+  string primaryDatabase = 3;
 
   // Hostname of the immudb instance with database to replicate
-  string masterAddress = 4;
+  string primaryHost = 4;
 
   // Port of the immudb instance with database to replicate
-  uint32 masterPort = 5;
+  uint32 primaryPort = 5;
 
   // Username of the user with read access of the database to replicate
-  string followerUsername = 6;
+  string primaryUsername = 6;
 
   // Password of the user with read access of the database to replicate
-  string followerPassword = 7;
+  string primaryPassword = 7;
 
   // Size of files stored on disk
   uint32 fileSize = 8;
@@ -977,7 +1047,7 @@ message DatabaseNullableSettings {
   // Maximum number of simultaneous IO writes
   NullableUint32 maxIOConcurrency = 14;
 
-  // Size of the LRU cache for transaction logs
+  // Size of the cache for transaction logs
   NullableUint32 txLogCacheSize = 15;
 
   // Maximum number of simultaneous value files opened
@@ -1009,6 +1079,24 @@ message DatabaseNullableSettings {
 
   // Settings of Appendable Hash Tree
   AHTNullableSettings ahtSettings = 25;
+
+  // Maximum number of pre-committed transactions
+  NullableUint32 maxActiveTransactions = 26;
+
+  // Limit the number of read entries per transaction
+  NullableUint32 mvccReadSetLimit = 27;
+
+  // Size of the cache for value logs
+  NullableUint32 vLogCacheSize = 28;
+
+  // Truncation settings
+  TruncationNullableSettings truncationSettings = 29;
+
+  // If set to true, values are stored together with the transaction header (true by default)
+  NullableBool embeddedValues = 30;
+
+  // Enable file preallocation
+  NullableBool preallocFiles = 31;
 }
 
 message ReplicationNullableSettings {
@@ -1016,19 +1104,19 @@ message ReplicationNullableSettings {
   NullableBool replica = 1;
 
   // Name of the database to replicate
-  NullableString masterDatabase = 2;
+  NullableString primaryDatabase = 2;
 
   // Hostname of the immudb instance with database to replicate
-  NullableString masterAddress = 3;
+  NullableString primaryHost = 3;
 
   // Port of the immudb instance with database to replicate
-  NullableUint32 masterPort = 4;
+  NullableUint32 primaryPort = 4;
 
   // Username of the user with read access of the database to replicate
-  NullableString followerUsername = 5;
+  NullableString primaryUsername = 5;
 
   // Password of the user with read access of the database to replicate
-  NullableString followerPassword = 6;
+  NullableString primaryPassword = 6;
 
   // Enable synchronous replication
   NullableBool syncReplication = 7;
@@ -1042,8 +1130,22 @@ message ReplicationNullableSettings {
   // Number of concurrent replications
   NullableUint32 replicationCommitConcurrency = 10;
 
-  // Allow precommitted transactions to be discarded if the follower diverges from the master
-  NullableBool AllowTxDiscarding = 11;
+  // Allow precommitted transactions to be discarded if the replica diverges from the primary
+  NullableBool allowTxDiscarding = 11;
+
+  // Disable integrity check when reading data during replication
+  NullableBool skipIntegrityCheck = 12;
+
+  // Wait for indexing to be up to date during replication
+  NullableBool waitForIndexing = 13;
+}
+
+message TruncationNullableSettings {
+  // Retention Period for data in the database
+  NullableMilliseconds retentionPeriod = 1;
+
+  // Truncation Frequency for the database
+  NullableMilliseconds truncationFrequency = 2;
 }
 
 message IndexNullableSettings {
@@ -1053,7 +1155,7 @@ message IndexNullableSettings {
   // Number of new index entries between disk flushes with file sync
   NullableUint32 syncThreshold = 2;
 
-  // Size of the Btree node LRU cache
+  // Size of the Btree node cache in bytes
   NullableUint32 cacheSize = 3;
 
   // Max size of a single Btree node in bytes
@@ -1085,6 +1187,12 @@ message IndexNullableSettings {
 
   // Percentage of node files cleaned up during each flush
   NullableFloat cleanupPercentage = 13;
+
+  // Maximum number of transactions indexed together
+  NullableUint32 maxBulkSize = 14;
+
+  // Maximum time waiting for more transactions to be committed and included into the same bulk
+  NullableMilliseconds bulkPreparationTimeout = 15;
 }
 
 message AHTNullableSettings {
@@ -1214,6 +1322,9 @@ message VerifiableSQLEntry {
 
   // Mapping of column IDs to their length constraints
   map<uint32, int32> ColLenById = 11;
+
+  // Variable is used to assign unique ids to new columns as they are created
+  uint32 MaxColId = 12;
 }
 
 message UseDatabaseReply {
@@ -1243,6 +1354,22 @@ message ChangePermissionRequest {
   uint32 permission = 4;
 }
 
+message ChangeSQLPrivilegesRequest {
+  // Action to perform
+  PermissionAction action = 1;
+
+  // Name of the user to update
+  string username = 2;
+
+  // Name of the database
+  string database = 3;
+
+  // SQL privileges: SELECT, CREATE, INSERT, UPDATE, DELETE, DROP, ALTER
+  repeated string privileges = 4;
+}
+
+message ChangeSQLPrivilegesResponse {}
+
 message SetActiveUserRequest {
   // If true, the user is active
   bool active = 1;
@@ -1260,10 +1387,10 @@ message DatabaseListRequestV2 {}
 
 message DatabaseListResponseV2 {
   // Database list with current database settings
-  repeated DatabaseWithSettings databases = 1;
+  repeated DatabaseInfo databases = 1;
 }
 
-message DatabaseWithSettings {
+message DatabaseInfo {
   // Database name
   string name = 1;
 
@@ -1272,10 +1399,23 @@ message DatabaseWithSettings {
 
   // If true, this database is currently loaded into memory
   bool loaded = 3;
+
+  // database disk size
+  uint64 diskSize = 4;
+
+  // total number of transactions
+  uint64 numTransactions = 5;
+
+  // the time when the db was created
+  uint64 created_at = 6;
+
+  // the user who created the database
+  string created_by = 7;
 }
 
 message Chunk {
   bytes content = 1;
+  map<string, bytes> metadata = 2;
 }
 
 message UseSnapshotRequest {
@@ -1302,7 +1442,10 @@ message SQLQueryRequest {
   repeated NamedParam params = 2;
 
   // If true, reuse previously opened snapshot
-  bool reuseSnapshot = 3;
+  bool reuseSnapshot = 3 [deprecated = true];
+
+  // Wheter the client accepts a streaming response
+  bool acceptStream = 4;
 }
 
 message NamedParam {
@@ -1367,6 +1510,7 @@ message SQLValue {
     bool b = 4;
     bytes bs = 5;
     int64 ts = 6;
+    double f = 7;
   }
 }
 
@@ -1384,6 +1528,13 @@ enum TxMode {
 message NewTxRequest {
   // Transaction mode
   TxMode mode = 1;
+  // An existing snapshot may be reused as long as it includes the specified transaction
+  // If not specified it will include up to the latest precommitted transaction
+  NullableUint64 snapshotMustIncludeTxID = 2;
+  // An existing snapshot may be reused as long as it is not older than the specified timeframe
+  NullableMilliseconds snapshotRenewalPeriod = 3;
+  // Indexing may not be up to date when doing MVCC
+  bool unsafeMVCC = 4;
 }
 
 message NewTxResponse {
@@ -1407,6 +1558,19 @@ message DebugInfo {
 message RetryInfo {
   // Number of milliseconds after which the request can be retried
   int32 retry_delay = 1;
+}
+
+message TruncateDatabaseRequest {
+  // Database name
+  string database = 1;
+
+  // Retention Period of data
+  int64 retentionPeriod = 2;
+}
+
+message TruncateDatabaseResponse {
+  // Database name
+  string database = 1;
 }
 
 // immudb gRPC & REST service
@@ -1434,6 +1598,13 @@ service ImmuService {
   rpc ChangePermission(ChangePermissionRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       post: "/user/changepermission"
+      body: "*"
+    };
+  }
+
+  rpc ChangeSQLPrivileges(ChangeSQLPrivilegesRequest) returns (ChangeSQLPrivilegesResponse) {
+    option (google.api.http) = {
+      post: "/user/changesqlprivileges"
       body: "*"
     };
   }
@@ -1467,7 +1638,7 @@ service ImmuService {
 
   rpc TxSQLExec(SQLExecRequest) returns (google.protobuf.Empty) {}
 
-  rpc TxSQLQuery(SQLQueryRequest) returns (SQLQueryResult) {}
+  rpc TxSQLQuery(SQLQueryRequest) returns (stream SQLQueryResult) {}
 
   rpc Login(LoginRequest) returns (LoginResponse) {
     option deprecated = true;
@@ -1517,7 +1688,7 @@ service ImmuService {
 
   rpc Delete(DeleteKeysRequest) returns (TxHeader) {
     option (google.api.http) = {
-      post: "/db/delete"
+      post: "/db/deletekey"
       body: "*"
     };
   }
@@ -1791,6 +1962,8 @@ service ImmuService {
 
   rpc replicateTx(stream Chunk) returns (TxHeader) {}
 
+  rpc streamExportTx(stream ExportTxRequest) returns (stream Chunk) {}
+
   rpc SQLExec(SQLExecRequest) returns (SQLExecResult) {
     option (google.api.http) = {
       post: "/db/sqlexec"
@@ -1798,7 +1971,15 @@ service ImmuService {
     };
   }
 
-  rpc SQLQuery(SQLQueryRequest) returns (SQLQueryResult) {
+  // For backward compatibility with the grpc-gateway API
+  rpc UnarySQLQuery(SQLQueryRequest) returns (SQLQueryResult) {
+    option (google.api.http) = {
+      post: "/db/sqlquery"
+      body: "*"
+    };
+  }
+
+  rpc SQLQuery(SQLQueryRequest) returns (stream SQLQueryResult) {
     option (google.api.http) = {
       post: "/db/sqlquery"
       body: "*"
@@ -1821,6 +2002,13 @@ service ImmuService {
   rpc VerifiableSQLGet(VerifiableSQLGetRequest) returns (VerifiableSQLEntry) {
     option (google.api.http) = {
       post: "/db/verifiable/sqlget"
+      body: "*"
+    };
+  }
+
+  rpc TruncateDatabase(TruncateDatabaseRequest) returns (TruncateDatabaseResponse) {
+    option (google.api.http) = {
+      post: "/db/truncate"
       body: "*"
     };
   }

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -48,8 +48,8 @@ func (s *ServerMock) TxSQLExec(ctx context.Context, request *schema.SQLExecReque
 	return s.Srv.TxSQLExec(ctx, request)
 }
 
-func (s *ServerMock) TxSQLQuery(ctx context.Context, request *schema.SQLQueryRequest) (*schema.SQLQueryResult, error) {
-	return s.Srv.TxSQLQuery(ctx, request)
+func (s *ServerMock) TxSQLQuery(req *schema.SQLQueryRequest, srv schema.ImmuService_TxSQLQueryServer) error {
+	return s.Srv.TxSQLQuery(req, srv)
 }
 
 func (s *ServerMock) NewTx(ctx context.Context, request *schema.NewTxRequest) (*schema.NewTxResponse, error) {
@@ -114,6 +114,10 @@ func (s *ServerMock) ExportTx(req *schema.ExportTxRequest, txsServer schema.Immu
 
 func (s *ServerMock) ReplicateTx(replicateTxServer schema.ImmuService_ReplicateTxServer) error {
 	return s.Srv.ReplicateTx(replicateTxServer)
+}
+
+func (s *ServerMock) StreamExportTx(stream schema.ImmuService_StreamExportTxServer) error {
+	return s.Srv.StreamExportTx(stream)
 }
 
 func (s *ServerMock) ListUsers(ctx context.Context, req *empty.Empty) (*schema.UserList, error) {
@@ -363,8 +367,12 @@ func (s *ServerMock) SQLExec(ctx context.Context, req *schema.SQLExecRequest) (*
 	return s.Srv.SQLExec(ctx, req)
 }
 
-func (s *ServerMock) SQLQuery(ctx context.Context, req *schema.SQLQueryRequest) (*schema.SQLQueryResult, error) {
-	return s.Srv.SQLQuery(ctx, req)
+func (s *ServerMock) UnarySQLQuery(ctx context.Context, req *schema.SQLQueryRequest) (*schema.SQLQueryResult, error) {
+	return s.Srv.UnarySQLQuery(ctx, req)
+}
+
+func (s *ServerMock) SQLQuery(req *schema.SQLQueryRequest, srv schema.ImmuService_SQLQueryServer) error {
+	return s.Srv.SQLQuery(req, srv)
 }
 
 func (s *ServerMock) ListTables(ctx context.Context, req *empty.Empty) (*schema.SQLQueryResult, error) {
@@ -377,4 +385,12 @@ func (s *ServerMock) DescribeTable(ctx context.Context, req *schema.Table) (*sch
 
 func (s *ServerMock) VerifiableSQLGet(ctx context.Context, req *schema.VerifiableSQLGetRequest) (*schema.VerifiableSQLEntry, error) {
 	return s.Srv.VerifiableSQLGet(ctx, req)
+}
+
+func (s *ServerMock) TruncateDatabase(ctx context.Context, req *schema.TruncateDatabaseRequest) (*schema.TruncateDatabaseResponse, error) {
+	return s.Srv.TruncateDatabase(ctx, req)
+}
+
+func (s *ServerMock) ChangeSQLPrivileges(ctx context.Context, r *schema.ChangeSQLPrivilegesRequest) (*schema.ChangeSQLPrivilegesResponse, error) {
+	return nil, nil
 }

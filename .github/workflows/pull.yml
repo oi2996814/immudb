@@ -9,12 +9,6 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            go: "1.15"
-
-          - os: ubuntu-latest
-            go: "1.16"
-
-          - os: ubuntu-latest
             go: "1.17"
 
           - os: ubuntu-latest
@@ -40,11 +34,11 @@ jobs:
 
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go }}
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Test
         run: make test
@@ -84,7 +78,7 @@ jobs:
       - name: Build with webconsole
         run: |
           sudo apt update && sudo apt install curl -y
-          WEBCONSOLE=default make all
+          WEBCONSOLE=default SWAGGER=true make all
         if: "!matrix.noWebconsole"
 
       - name: Build without webconsole
@@ -105,6 +99,7 @@ jobs:
           set -euxo pipefail
           ${IMMUCLIENT} || echo "Test #1 OK - immuclient failed to connect (no server started)"
           ${IMMUDB} -d
+          sleep 5
           ${IMMUCLIENT} login --username immudb --password immudb || { echo "Test #2 Login (Default credentials) Failed"; exit 1; }
           echo -n "immudb" | ${IMMUCLIENT} login --username immudb || { echo "Test #3 Login (Default credentials from stdin) Failed"; exit 1; }
           ${IMMUCLIENT} safeset test3 githubaction || { echo "Test #4 Failed to safeset simple values"; exit 1; }
@@ -121,14 +116,26 @@ jobs:
           webconsole_page=$(curl -s localhost:8080) || { echo "Test #8 web console unreachable"; exit 1; }
           grep -q "<title>immudb webconsole</title>" <<< $webconsole_page || { echo "Test #9 Failed, web console reachable but title not found"; exit 1; }
 
+  gosec:
+    name: Run Gosec Security Scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/checkout@v4
+      - uses: securego/gosec@v2.17.0
+        with:
+          args: -fmt=json -out=results-$JOB_ID.json -no-fail ./...
+
   coveralls:
     name: Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.18"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: |
           # Spawn minio docker container in the background
           docker run -d -t -p 9000:9000 --name minio \
@@ -144,12 +151,21 @@ jobs:
 
           export PATH=$PATH:$(go env GOPATH)/bin
           set -o pipefail
-          ./scripts/go-acc ./... --covermode=atomic --ignore test,immuclient,immuadmin,helper,cmdtest,sservice,version,tools --tags minio || true
-          cat coverage.txt | grep -v "schema.pb" | grep -v "schema_grpc.pb" | grep -v "immuclient" | grep -v "immuadmin" | grep -v "helper" | grep -v "cmdtest" | grep -v "sservice" | grep -v "version" | grep -v "tools" > coverage.out
-          ./scripts/goveralls -coverprofile=coverage.out -service=gh-ci -repotoken ${{ secrets.COVERALLS_TOKEN }}
+          ./ext-tools/go-acc ./... --covermode=atomic --ignore test,immuclient,immuadmin,helper,fs,cmdtest,sservice,version,tools,webconsole,protomodel,schema,swagger --tags minio || true
+          cat coverage.txt | grep -v "test" | grep -v "schema" | grep -v "protomodel" | grep -v "swagger" | grep -v "webserver.go" | grep -v "immuclient" | grep -v "immuadmin" | grep -v "helper" | grep -v "fs" | grep -v "cmdtest" | grep -v "sservice" | grep -v "version" | grep -v "tools" | grep -v "webconsole" > coverage.out
+          ./ext-tools/goveralls -coverprofile=coverage.out -service=gh-ci
 
           # Stop minio
           docker rm -f minio
+        env:
+          COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sonarsource:
+    name: Coverage
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
       - name: Analyze with SonarCloud
         uses: sonarsource/sonarcloud-github-action@master
         env:
@@ -177,7 +193,7 @@ jobs:
           RES="$(echo "${PERF_TEST_RUNS_ON:-${PERF_TEST_RUNS_ON_DEFAULT}}" | jq -c '.targets')"
           echo "Detected targets:"
           echo "$RES" | jq .
-          echo "::set-output name=matrix::${RES}"
+          echo "matrix=${RES}" >> $GITHUB_OUTPUT
 
   performance-test-suite:
     needs: performance-test-suite-detect-runners
@@ -187,14 +203,14 @@ jobs:
     name: Performance Test Suite (${{ matrix.target.name }})
     runs-on: ${{ matrix.target.runs-on }}
     steps:
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.18"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: go build -o perf-test-suite ./test/performance-test-suite/cmd/perf-test/
       - run: ./perf-test-suite > perf-test-results.json
       - name: Upload test results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Performance Test Results (${{ matrix.target.name }})
           path: perf-test-results.json

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/codenotary/immudb/embedded/store"
+	"github.com/codenotary/immudb/pkg/api/schema"
 	ic "github.com/codenotary/immudb/pkg/client"
 
 	"github.com/codenotary/immudb/pkg/server"
@@ -32,29 +33,46 @@ import (
 	"github.com/codenotary/immudb/pkg/server/sessions"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestSession_OpenCloseSession(t *testing.T) {
 	_, client, _ := setupTestServerAndClient(t)
 
-	err := client.OpenSession(context.TODO(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
+	err := client.OpenSession(context.Background(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
 	require.ErrorIs(t, err, ic.ErrSessionAlreadyOpen)
 
-	client.Set(context.TODO(), []byte("myKey"), []byte("myValue"))
+	client.Set(context.Background(), []byte("myKey"), []byte("myValue"))
 
-	err = client.CloseSession(context.TODO())
+	err = client.CloseSession(context.Background())
 	require.NoError(t, err)
 
-	err = client.OpenSession(context.TODO(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
+	err = client.CloseSession(context.Background())
+	require.Error(t, err)
+
+	err = client.OpenSession(context.Background(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
 	require.NoError(t, err)
 
-	entry, err := client.Get(context.TODO(), []byte("myKey"))
+	client.GetServiceClient().KeepAlive(context.Background(), &emptypb.Empty{})
+	require.NoError(t, err)
+
+	entry, err := client.Get(context.Background(), []byte("myKey"))
 	require.NoError(t, err)
 	require.NotNil(t, entry)
 	require.Equal(t, []byte("myValue"), entry.Value)
 
-	err = client.CloseSession(context.TODO())
+	err = client.CloseSession(context.Background())
 	require.NoError(t, err)
+
+	t.Run("Lowercase Database Name", func(t *testing.T) {
+		err = client.OpenSession(context.Background(), []byte(`immudb`), []byte(`immudb`), "DeFaulTDb")
+		require.NoError(t, err)
+
+		err = client.CloseSession(context.Background())
+		require.NoError(t, err)
+
+	})
 }
 
 func TestSession_OpenCloseSessionMulti(t *testing.T) {
@@ -85,7 +103,7 @@ func TestSession_OpenCloseSessionMulti(t *testing.T) {
 			client := ic.NewClient().WithOptions(ic.
 				DefaultOptions().
 				WithDir(t.TempDir()).
-				WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure()}).
+				WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials())}).
 				WithHeartBeatFrequency(time.Millisecond * 100),
 			)
 			err := client.OpenSession(context.Background(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
@@ -108,7 +126,7 @@ func TestSession_OpenCloseSessionMulti(t *testing.T) {
 
 func TestSession_OpenSessionNotConnected(t *testing.T) {
 	client := ic.NewClient()
-	err := client.CloseSession(context.TODO())
+	err := client.CloseSession(context.Background())
 	require.ErrorIs(t, ic.ErrNotConnected, err)
 }
 
@@ -139,7 +157,7 @@ func TestSession_ExpireSessions(t *testing.T) {
 			client := ic.NewClient().WithOptions(ic.
 				DefaultOptions().
 				WithDir(t.TempDir()).
-				WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithInsecure()}),
+				WithDialOptions([]grpc.DialOption{grpc.WithContextDialer(bs.Dialer), grpc.WithTransportCredentials(insecure.NewCredentials())}),
 			)
 
 			err := client.OpenSession(context.Background(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
@@ -177,6 +195,32 @@ func TestSession_CreateDBFromSQLStmts(t *testing.T) {
 	`, nil)
 	require.NoError(t, err)
 
-	err = client.CloseSession(context.TODO())
+	err = client.CloseSession(context.Background())
+	require.NoError(t, err)
+}
+
+func TestSession_ListUSersFromSQLStmts(t *testing.T) {
+	_, client, ctx := setupTestServerAndClient(t)
+
+	_, err := client.SQLExec(ctx, "CREATE DATABASE db1", nil)
+	require.NoError(t, err)
+
+	err = client.CreateUser(ctx, []byte("user1"), []byte("user1Password!"), 1, "defaultdb")
+	require.NoError(t, err)
+
+	err = client.CreateUser(ctx, []byte("user2"), []byte("user2Password!"), 1, "defaultdb")
+	require.NoError(t, err)
+
+	err = client.CreateUser(ctx, []byte("user3"), []byte("user3Password!"), 1, "db1")
+	require.NoError(t, err)
+
+	err = client.SetActiveUser(ctx, &schema.SetActiveUserRequest{Username: "user2", Active: false})
+	require.NoError(t, err)
+
+	res, err := client.SQLQuery(ctx, "SHOW USERS", nil, false)
+	require.NoError(t, err)
+	require.Len(t, res.Rows, 2)
+
+	err = client.CloseSession(context.Background())
 	require.NoError(t, err)
 }

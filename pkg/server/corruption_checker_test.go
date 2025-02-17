@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,11 +16,13 @@ limitations under the License.
 
 package server
 
+import "fmt"
+
 /*
 import (
 	"testing"
 
-	"github.com/codenotary/immudb/pkg/logger"
+	"github.com/codenotary/immudb/embedded/logger"
 )
 
 
@@ -56,7 +58,7 @@ func TestEmptyDBCorruptionChecker(t *testing.T) {
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGenerator{})
 
-	err = cc.Start(context.TODO())
+	err = cc.Start(context.Background())
 
 	for i := 0; i < dbList.Length(); i++ {
 		val := dbList.GetByIndex(int64(i))
@@ -84,7 +86,7 @@ func TestCorruptionChecker(t *testing.T) {
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGenerator{})
 
-	err = cc.Start(context.TODO())
+	err = cc.Start(context.Background())
 
 	for i := 0; i < dbList.Length(); i++ {
 		val := dbList.GetByIndex(int64(i))
@@ -146,7 +148,7 @@ func TestCorruptionCheckerOnTamperInsertionOrderIndexDb(t *testing.T) {
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGenerator{})
 
-	err = cc.Start(context.TODO())
+	err = cc.Start(context.Background())
 
 	for i := 0; i < dbList.Length(); i++ {
 		val := dbList.GetByIndex(int64(i))
@@ -206,7 +208,7 @@ func TestCorruptionCheckerOnTamperDbInconsistentState(t *testing.T) {
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGenerator{})
 
-	err = cc.Start(context.TODO())
+	err = cc.Start(context.Background())
 
 	for i := 0; i < dbList.Length(); i++ {
 		val := dbList.GetByIndex(int64(i))
@@ -275,7 +277,7 @@ func TestCorruptionCheckerOnTamperDb(t *testing.T) {
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGeneratorMock{})
 
-	err = cc.Start(context.TODO())
+	err = cc.Start(context.Background())
 	assert.NoError(t, err)
 
 	for i := 0; i < dbList.Length(); i++ {
@@ -309,7 +311,7 @@ func TestCorruptionChecker_Stop(t *testing.T) {
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGenerator{})
 
-	cc.Start(context.TODO())
+	cc.Start(context.Background())
 
 	for i := 0; i < dbList.Length(); i++ {
 		val := dbList.GetByIndex(int64(i))
@@ -337,7 +339,7 @@ func TestCorruptionChecker_ExitImmediatly(t *testing.T) {
 	cco.singleiteration = true
 
 	cc := NewCorruptionChecker(cco, dbList, &mockLogger{}, randomGenerator{})
-	err = cc.Start(context.TODO())
+	err = cc.Start(context.Background())
 	cc.Stop()
 
 	for i := 0; i < dbList.Length(); i++ {
@@ -359,7 +361,7 @@ func TestInt63(t *testing.T) {
 	rand := newCryptoRandSource()
 	n := rand.Int63()
 	if n == 0 {
-		t.Fatal("cryptorand source faild")
+		t.Fatal("cryptorand source failed")
 	}
 }
 
@@ -377,17 +379,34 @@ func makeDB(dir string) *badger.DB {
 
 */
 
-type mockLogger struct{}
+type mockLogger struct {
+	captureLogs bool
+	logs        []string
+}
 
-func (l *mockLogger) Errorf(f string, v ...interface{}) {}
+func (l *mockLogger) Errorf(f string, v ...interface{}) {
+	l.log("ERROR", f, v...)
+}
 
-func (l *mockLogger) Warningf(f string, v ...interface{}) {}
+func (l *mockLogger) Warningf(f string, v ...interface{}) {
+	l.log("WARN", f, v...)
+}
 
-func (l *mockLogger) Infof(f string, v ...interface{}) {}
+func (l *mockLogger) Infof(f string, v ...interface{}) {
+	l.log("INFO", f, v...)
+}
 
-func (l *mockLogger) Debugf(f string, v ...interface{}) {}
+func (l *mockLogger) Debugf(f string, v ...interface{}) {
+	l.log("DEBUG", f, v...)
+}
 
 func (l *mockLogger) Close() error { return nil }
+
+func (l *mockLogger) log(level, f string, v ...interface{}) {
+	if l.captureLogs {
+		l.logs = append(l.logs, level+": "+fmt.Sprintf(f, v...))
+	}
+}
 
 /*
 func TestCryptoRandSource_Seed(t *testing.T) {

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,6 @@ limitations under the License.
 package integration
 
 import (
-	"io/ioutil"
-	"os"
 	"testing"
 	"time"
 
@@ -27,9 +25,7 @@ import (
 )
 
 func TestServerRecovertMode(t *testing.T) {
-	dir, err := ioutil.TempDir("", "integration_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	serverOptions := server.DefaultOptions().
 		WithDir(dir).
@@ -41,8 +37,8 @@ func TestServerRecovertMode(t *testing.T) {
 
 	s := server.DefaultServer().WithOptions(serverOptions).(*server.ImmuServer)
 
-	err = s.Initialize()
-	require.Equal(t, server.ErrAuthMustBeDisabled, err)
+	err := s.Initialize()
+	require.ErrorIs(t, err, server.ErrAuthMustBeDisabled)
 
 	serverOptions = server.DefaultOptions().
 		WithDir(dir).

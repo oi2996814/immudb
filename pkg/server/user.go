@@ -1,3 +1,19 @@
+/*
+Copyright 2024 Codenotary Inc. All rights reserved.
+
+SPDX-License-Identifier: BUSL-1.1
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://mariadb.com/bsl11/
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package server
 
 import (
@@ -6,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/codenotary/immudb/embedded/sql"
 	"github.com/codenotary/immudb/pkg/database"
 	"github.com/codenotary/immudb/pkg/server/sessions"
 
@@ -23,7 +40,7 @@ func (s *ImmuServer) Login(ctx context.Context, r *schema.LoginRequest) (*schema
 		return nil, errors.New(ErrAuthDisabled).WithCode(errors.CodProtocolViolation)
 	}
 
-	u, err := s.getValidatedUser(r.User, r.Password)
+	u, err := s.getValidatedUser(ctx, r.User, r.Password)
 	if err != nil {
 		return nil, errors.Wrap(err, ErrInvalidUsernameOrPassword)
 	}
@@ -130,15 +147,17 @@ func (s *ImmuServer) CreateUser(ctx context.Context, r *schema.CreateUserRequest
 		return nil, fmt.Errorf("can not create another system admin")
 	}
 
-	_, err = s.getUser(r.User, true)
+	_, err = s.getUser(ctx, r.User)
 	if err == nil {
 		return nil, fmt.Errorf("user already exists")
 	}
 
-	_, _, err = s.insertNewUser(r.User, r.Password, r.GetPermission(), r.Database, true, loggedInuser.Username)
+	_, _, err = s.insertNewUser(ctx, r.User, r.Password, r.GetPermission(), r.Database, loggedInuser.Username)
 	if err != nil {
 		return nil, err
 	}
+
+	s.Logger.Infof("user %s was created by user %s", r.User, loggedInuser.Username)
 
 	return &empty.Empty{}, nil
 }
@@ -172,7 +191,7 @@ func (s *ImmuServer) ListUsers(ctx context.Context, req *empty.Empty) (*schema.U
 		}
 	}
 
-	itemList, err := s.sysDB.Scan(&schema.ScanRequest{
+	itemList, err := s.sysDB.Scan(ctx, &schema.ScanRequest{
 		Prefix: []byte{KeyPrefixUser},
 		NoWait: true,
 	})
@@ -186,105 +205,82 @@ func (s *ImmuServer) ListUsers(ctx context.Context, req *empty.Empty) (*schema.U
 		for i := 0; i < len(itemList.Entries); i++ {
 			itemList.Entries[i].Key = itemList.Entries[i].Key[1:]
 
-			var user auth.User
-
-			err = json.Unmarshal(itemList.Entries[i].Value, &user)
+			usr, err := unmarshalSchemaUser(itemList.Entries[i].Value)
 			if err != nil {
 				return nil, err
 			}
-
-			permissions := []*schema.Permission{}
-
-			for _, val := range user.Permissions {
-				permissions = append(permissions, &schema.Permission{
-					Database:   val.Database,
-					Permission: val.Permission,
-				})
-			}
-
-			u := schema.User{
-				User:        []byte(user.Username),
-				Createdat:   user.CreatedAt.String(),
-				Createdby:   user.CreatedBy,
-				Permissions: permissions,
-				Active:      user.Active,
-			}
-
-			userlist.Users = append(userlist.Users, &u)
+			userlist.Users = append(userlist.Users, usr)
 		}
-
 		return userlist, nil
-
 	} else if db != nil && loggedInuser.WhichPermission(db.GetName()) == auth.PermissionAdmin {
 		// for admin users return only users for the database that is has selected
 		selectedDbname := db.GetName()
 		userlist := &schema.UserList{}
 
 		for i := 0; i < len(itemList.Entries); i++ {
-			include := false
 			itemList.Entries[i].Key = itemList.Entries[i].Key[1:]
 
-			var user auth.User
-
-			err = json.Unmarshal(itemList.Entries[i].Value, &user)
+			usr, err := unmarshalSchemaUser(itemList.Entries[i].Value)
 			if err != nil {
 				return nil, err
 			}
 
-			permissions := []*schema.Permission{}
+			include := false
 
-			for _, val := range user.Permissions {
+			for _, val := range usr.Permissions {
 				//check if this user has any permission for this database
 				//include in the reply only if it has any permission for the currently selected database
 				if val.Database == selectedDbname {
 					include = true
 				}
-
-				permissions = append(permissions, &schema.Permission{
-					Database:   val.Database,
-					Permission: val.Permission,
-				})
 			}
 
 			if include {
-				u := schema.User{
-					User:        []byte(user.Username),
-					Createdat:   user.CreatedAt.String(),
-					Createdby:   user.CreatedBy,
-					Permissions: permissions,
-					Active:      user.Active,
-				}
-
-				userlist.Users = append(userlist.Users, &u)
+				userlist.Users = append(userlist.Users, usr)
 			}
 		}
-
 		return userlist, nil
-
 	} else {
 		// any other permission return only its data
-		userlist := &schema.UserList{}
-		permissions := []*schema.Permission{}
-
-		for _, val := range loggedInuser.Permissions {
-			permissions = append(permissions, &schema.Permission{
-				Database:   val.Database,
-				Permission: val.Permission,
-			})
+		usr, err := toSchemaUser(loggedInuser)
+		if err != nil {
+			return nil, err
 		}
-
-		u := schema.User{
-			User:        []byte(loggedInuser.Username),
-			Createdat:   loggedInuser.CreatedAt.String(),
-			Createdby:   loggedInuser.CreatedBy,
-			Permissions: permissions,
-			Active:      loggedInuser.Active,
-		}
-
-		userlist.Users = append(userlist.Users, &u)
-
-		return userlist, nil
+		return &schema.UserList{Users: []*schema.User{usr}}, nil
 	}
+}
+
+func unmarshalSchemaUser(data []byte) (*schema.User, error) {
+	var u auth.User
+	if err := json.Unmarshal(data, &u); err != nil {
+		return nil, err
+	}
+	u.SetSQLPrivileges()
+	return toSchemaUser(&u)
+}
+
+func toSchemaUser(u *auth.User) (*schema.User, error) {
+	permissions := make([]*schema.Permission, len(u.Permissions))
+	for i, val := range u.Permissions {
+		permissions[i] = &schema.Permission{
+			Database:   val.Database,
+			Permission: val.Permission,
+		}
+	}
+
+	privileges := make([]*schema.SQLPrivilege, len(u.SQLPrivileges))
+	for i, p := range u.SQLPrivileges {
+		privileges[i] = &schema.SQLPrivilege{Database: p.Database, Privilege: p.Privilege}
+	}
+
+	return &schema.User{
+		User:          []byte(u.Username),
+		Createdat:     u.CreatedAt.String(),
+		Createdby:     u.CreatedBy,
+		Permissions:   permissions,
+		SqlPrivileges: privileges,
+		Active:        u.Active,
+	}, nil
 }
 
 // ChangePassword ...
@@ -320,7 +316,7 @@ func (s *ImmuServer) ChangePassword(ctx context.Context, r *schema.ChangePasswor
 		return nil, fmt.Errorf("username can not be empty")
 	}
 
-	targetUser, err := s.getUser(r.User, true)
+	targetUser, err := s.getUser(ctx, r.User)
 	if err != nil {
 		return nil, fmt.Errorf("user %s was not found or it was not created by you", string(r.User))
 	}
@@ -339,9 +335,11 @@ func (s *ImmuServer) ChangePassword(ctx context.Context, r *schema.ChangePasswor
 
 	targetUser.CreatedBy = user.Username
 	targetUser.CreatedAt = time.Now()
-	if err := s.saveUser(targetUser); err != nil {
+	if err := s.saveUser(ctx, targetUser); err != nil {
 		return nil, err
 	}
+
+	s.Logger.Infof("password for user %s was changed by user %s", targetUser.Username, user.Username)
 
 	// remove user from logged in users
 	s.removeUserFromLoginList(targetUser.Username)
@@ -365,9 +363,16 @@ func (s *ImmuServer) ChangePermission(ctx context.Context, r *schema.ChangePermi
 		if len(r.Username) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "username can not be empty")
 		}
+
 		if len(r.Database) == 0 {
 			return nil, status.Errorf(codes.InvalidArgument, "database can not be empty")
 		}
+
+		_, err := s.dbList.GetByName(r.Database)
+		if r.Database != SystemDBName && err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "database does not exist")
+		}
+
 		if (r.Action != schema.PermissionAction_GRANT) &&
 			(r.Action != schema.PermissionAction_REVOKE) {
 			return nil, status.Errorf(codes.InvalidArgument, "action not recognized")
@@ -390,25 +395,25 @@ func (s *ImmuServer) ChangePermission(ctx context.Context, r *schema.ChangePermi
 	}
 
 	if r.Username == auth.SysAdminUsername {
-		return nil, status.Errorf(codes.InvalidArgument, "changing sysadmin permisions is not allowed")
+		return nil, status.Errorf(codes.InvalidArgument, "changing sysadmin permissions is not allowed")
 	}
 
 	if r.Database == SystemDBName && r.Permission == auth.PermissionRW {
 		return nil, ErrPermissionDenied
 	}
 
-	//check if user exists
-	targetUser, err := s.getUser([]byte(r.Username), true)
+	// check if user exists
+	targetUser, err := s.getUser(ctx, []byte(r.Username))
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "user %s not found", string(r.Username))
 	}
 
-	//target user should be active
+	// target user should be active
 	if !targetUser.Active {
 		return nil, status.Errorf(codes.FailedPrecondition, "user %s is not active", string(r.Username))
 	}
 
-	//check if requesting user has permission on this database
+	// check if requesting user has permission on this database
 	if !user.IsSysAdmin {
 		if !user.HasPermission(r.Database, auth.PermissionAdmin) {
 			return nil, status.Errorf(codes.PermissionDenied, "you do not have permission on this database")
@@ -423,12 +428,16 @@ func (s *ImmuServer) ChangePermission(ctx context.Context, r *schema.ChangePermi
 
 	targetUser.CreatedBy = user.Username
 	targetUser.CreatedAt = time.Now()
+	targetUser.SQLPrivileges = defaultSQLPrivilegesForPermission(r.Database, r.Permission)
+	targetUser.HasPrivileges = true
 
-	if err := s.saveUser(targetUser); err != nil {
+	if err := s.saveUser(ctx, targetUser); err != nil {
 		return nil, err
 	}
 
-	//remove user from loggedin users
+	s.Logger.Infof("permissions of user %s for database %s was changed by user %s", targetUser.Username, r.Database, user.Username)
+
+	// remove user from loggedin users
 	s.removeUserFromLoginList(targetUser.Username)
 
 	return new(empty.Empty), nil
@@ -465,7 +474,7 @@ func (s *ImmuServer) SetActiveUser(ctx context.Context, r *schema.SetActiveUserR
 		return nil, fmt.Errorf("changing your own status is not allowed")
 	}
 
-	targetUser, err := s.getUser([]byte(r.Username), true)
+	targetUser, err := s.getUser(ctx, []byte(r.Username))
 	if err != nil {
 		return nil, fmt.Errorf("user %s not found", r.Username)
 	}
@@ -479,9 +488,14 @@ func (s *ImmuServer) SetActiveUser(ctx context.Context, r *schema.SetActiveUserR
 	targetUser.CreatedBy = user.Username
 	targetUser.CreatedAt = time.Now()
 
-	if err := s.saveUser(targetUser); err != nil {
+	if err := s.saveUser(ctx, targetUser); err != nil {
 		return nil, err
 	}
+
+	s.Logger.Infof("user %s was %s by user %s", targetUser.Username, map[bool]string{
+		true:  "activated",
+		false: "deactivated",
+	}[r.Active], user.Username)
 
 	//remove user from loggedin users
 	s.removeUserFromLoginList(targetUser.Username)
@@ -492,19 +506,11 @@ func (s *ImmuServer) SetActiveUser(ctx context.Context, r *schema.SetActiveUserR
 // insertNewUser inserts a new user to the system database and returns username and plain text password
 // A new password is generated automatically if passed parameter is empty
 // If enforceStrongAuth is true it checks if username and password meet security criteria
-func (s *ImmuServer) insertNewUser(username []byte, plainPassword []byte, permission uint32, database string, enforceStrongAuth bool, createdBy string) ([]byte, []byte, error) {
-	if enforceStrongAuth {
-		if !auth.IsValidUsername(string(username)) {
-			return nil, nil, status.Errorf(
-				codes.InvalidArgument,
-				"username can only contain letters, digits and underscores")
-		}
-	}
-
-	if enforceStrongAuth {
-		if err := auth.IsStrongPassword(string(plainPassword)); err != nil {
-			return nil, nil, status.Errorf(codes.InvalidArgument, "%v", err)
-		}
+func (s *ImmuServer) insertNewUser(ctx context.Context, username []byte, plainPassword []byte, permission uint32, database string, createdBy string) ([]byte, []byte, error) {
+	if !auth.IsValidUsername(string(username)) {
+		return nil, nil, status.Errorf(
+			codes.InvalidArgument,
+			"username can only contain letters, digits and underscores")
 	}
 
 	userdata := new(auth.User)
@@ -514,8 +520,10 @@ func (s *ImmuServer) insertNewUser(username []byte, plainPassword []byte, permis
 	}
 
 	userdata.Active = true
+	userdata.HasPrivileges = true
 	userdata.Username = string(username)
 	userdata.Permissions = append(userdata.Permissions, auth.Permission{Permission: permission, Database: database})
+	userdata.SQLPrivileges = defaultSQLPrivilegesForPermission(database, permission)
 	userdata.CreatedBy = createdBy
 	userdata.CreatedAt = time.Now()
 
@@ -527,13 +535,13 @@ func (s *ImmuServer) insertNewUser(username []byte, plainPassword []byte, permis
 		return nil, nil, fmt.Errorf("unknown permission")
 	}
 
-	err = s.saveUser(userdata)
+	err = s.saveUser(ctx, userdata)
 
 	return username, plainpassword, err
 }
 
-func (s *ImmuServer) getValidatedUser(username []byte, password []byte) (*auth.User, error) {
-	userdata, err := s.getUser(username, true)
+func (s *ImmuServer) getValidatedUser(ctx context.Context, username []byte, password []byte) (*auth.User, error) {
+	userdata, err := s.getUser(ctx, username)
 	if err != nil {
 		return nil, err
 	}
@@ -547,12 +555,12 @@ func (s *ImmuServer) getValidatedUser(username []byte, password []byte) (*auth.U
 }
 
 // getUser returns userdata (username,hashed password, permission, active) from username
-func (s *ImmuServer) getUser(username []byte, includeDeactivated bool) (*auth.User, error) {
+func (s *ImmuServer) getUser(ctx context.Context, username []byte) (*auth.User, error) {
 	key := make([]byte, 1+len(username))
 	key[0] = KeyPrefixUser
 	copy(key[1:], username)
 
-	item, err := s.sysDB.Get(&schema.KeyRequest{Key: key})
+	item, err := s.sysDB.Get(ctx, &schema.KeyRequest{Key: key})
 	if err != nil {
 		return nil, err
 	}
@@ -564,16 +572,11 @@ func (s *ImmuServer) getUser(username []byte, includeDeactivated bool) (*auth.Us
 		return nil, err
 	}
 
-	if !includeDeactivated {
-		if usr.Active {
-			return nil, fmt.Errorf("user not found")
-		}
-	}
-
+	usr.SetSQLPrivileges()
 	return &usr, nil
 }
 
-func (s *ImmuServer) saveUser(user *auth.User) error {
+func (s *ImmuServer) saveUser(ctx context.Context, user *auth.User) error {
 	userData, err := json.Marshal(user)
 	if err != nil {
 		return logErr(s.Logger, "error saving user: %v", err)
@@ -584,7 +587,7 @@ func (s *ImmuServer) saveUser(user *auth.User) error {
 	copy(userKey[1:], []byte(user.Username))
 
 	userKV := &schema.KeyValue{Key: userKey, Value: userData}
-	_, err = s.sysDB.Set(&schema.SetRequest{KVs: []*schema.KeyValue{userKV}})
+	_, err = s.sysDB.Set(ctx, &schema.SetRequest{KVs: []*schema.KeyValue{userKV}})
 
 	time.Sleep(time.Duration(10) * time.Millisecond)
 
@@ -637,4 +640,118 @@ func (s *ImmuServer) getLoggedInUserDataFromUsername(username string) (*auth.Use
 	}
 
 	return userdata, nil
+}
+
+func (s *ImmuServer) ChangeSQLPrivileges(ctx context.Context, r *schema.ChangeSQLPrivilegesRequest) (*schema.ChangeSQLPrivilegesResponse, error) {
+	s.Logger.Debugf("ChangeSQLPrivileges %+v", r)
+
+	if s.Options.GetMaintenance() {
+		return nil, ErrNotAllowedInMaintenanceMode
+	}
+
+	// sanitize input
+	{
+		if len(r.Username) == 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "username can not be empty")
+		}
+		if _, err := s.dbList.GetByName(r.Database); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, err.Error())
+		}
+		if (r.Action != schema.PermissionAction_GRANT) &&
+			(r.Action != schema.PermissionAction_REVOKE) {
+			return nil, status.Errorf(codes.InvalidArgument, "action not recognized")
+		}
+	}
+
+	privileges := make([]string, len(r.Privileges))
+	for i, p := range r.Privileges {
+		if !isValidPrivilege(p) {
+			return nil, status.Errorf(codes.InvalidArgument, "SQL privilege not recognized")
+		}
+		privileges[i] = string(p)
+	}
+
+	_, user, err := s.getLoggedInUserdataFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	//do not allow to change own permissions, user can lock itsself out
+	if r.Username == user.Username {
+		return nil, status.Errorf(codes.InvalidArgument, "changing your own privileges is not allowed")
+	}
+
+	if r.Username == auth.SysAdminUsername {
+		return nil, status.Errorf(codes.InvalidArgument, "changing sysadmin privileges is not allowed")
+	}
+
+	// check if user exists
+	targetUser, err := s.getUser(ctx, []byte(r.Username))
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "user %s not found", r.Username)
+	}
+
+	// target user should be active
+	if !targetUser.Active {
+		return nil, status.Errorf(codes.FailedPrecondition, "user %s is not active", r.Username)
+	}
+
+	// target user should have permission on the requested database
+	if targetUser.WhichPermission(r.Database) == auth.PermissionNone {
+		return nil, status.Errorf(codes.FailedPrecondition, "user %s doesn't have permission on database %s", r.Username, r.Database)
+	}
+
+	// check if requesting user has permission on this database
+	if !user.IsSysAdmin {
+		if !user.HasPermission(r.Database, auth.PermissionAdmin) {
+			return nil, status.Errorf(codes.PermissionDenied, "you do not have permission on this database")
+		}
+	}
+
+	if r.Action == schema.PermissionAction_REVOKE {
+		targetUser.RevokeSQLPrivileges(r.Database, privileges)
+	} else {
+		targetUser.GrantSQLPrivileges(r.Database, privileges)
+	}
+
+	targetUser.CreatedBy = user.Username
+	targetUser.CreatedAt = time.Now()
+	targetUser.HasPrivileges = true
+
+	if err := s.saveUser(ctx, targetUser); err != nil {
+		return nil, err
+	}
+
+	s.Logger.Infof("permissions of user %s for database %s was changed by user %s", targetUser.Username, r.Database, user.Username)
+
+	// remove user from loggedin users
+	s.removeUserFromLoginList(targetUser.Username)
+
+	return &schema.ChangeSQLPrivilegesResponse{}, nil
+}
+
+func isValidPrivilege(p string) bool {
+	switch sql.SQLPrivilege(p) {
+	case sql.SQLPrivilegeSelect,
+		sql.SQLPrivilegeCreate,
+		sql.SQLPrivilegeInsert,
+		sql.SQLPrivilegeUpdate,
+		sql.SQLPrivilegeDelete,
+		sql.SQLPrivilegeDrop,
+		sql.SQLPrivilegeAlter:
+		return true
+	}
+	return false
+}
+
+func defaultSQLPrivilegesForPermission(database string, permission uint32) []auth.SQLPrivilege {
+	sqlPrivileges := sql.DefaultSQLPrivilegesForPermission(sql.PermissionFromCode(permission))
+	privileges := make([]auth.SQLPrivilege, len(sqlPrivileges))
+	for i, p := range sqlPrivileges {
+		privileges[i] = auth.SQLPrivilege{
+			Database:  database,
+			Privilege: string(p),
+		}
+	}
+	return privileges
 }

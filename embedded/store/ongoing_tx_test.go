@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,9 @@ limitations under the License.
 package store
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -43,49 +45,52 @@ func TestOngoingTXAddPrecondition(t *testing.T) {
 }
 
 func TestOngoingTxCheckPreconditionsCornerCases(t *testing.T) {
-	otx := &OngoingTx{}
-	idx := &dummyKeyIndex{}
+	st, err := Open(t.TempDir(), DefaultOptions())
+	require.NoError(t, err)
 
-	err := otx.checkPreconditions(idx)
+	defer immustoreClose(t, st)
+
+	otx := &OngoingTx{}
+
+	err = otx.checkPreconditions(context.Background(), st)
 	require.NoError(t, err)
 
 	otx.preconditions = []Precondition{nil}
-	err = otx.checkPreconditions(idx)
+	err = otx.checkPreconditions(context.Background(), st)
 	require.ErrorIs(t, err, ErrInvalidPrecondition)
 	require.ErrorIs(t, err, ErrInvalidPreconditionNull)
 
-	idx.closed = true
+	err = st.Close()
+	require.NoError(t, err)
+
 	otx.preconditions = []Precondition{
 		&PreconditionKeyMustExist{Key: []byte{1}},
 	}
-	err = otx.checkPreconditions(idx)
+	err = otx.checkPreconditions(context.Background(), st)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	otx.preconditions = []Precondition{
 		&PreconditionKeyMustNotExist{Key: []byte{1}},
 	}
-	err = otx.checkPreconditions(idx)
+	err = otx.checkPreconditions(context.Background(), st)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	otx.preconditions = []Precondition{
 		&PreconditionKeyNotModifiedAfterTx{Key: []byte{1}, TxID: 1},
 	}
-	err = otx.checkPreconditions(idx)
+	err = otx.checkPreconditions(context.Background(), st)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 }
 
-type dummyKeyIndex struct {
-	closed bool
-}
+func TestOngoingTxOptions(t *testing.T) {
+	var opts *TxOptions
+	require.Error(t, opts.Validate())
 
-func (i *dummyKeyIndex) Get(key []byte) (valRef ValueRef, err error) {
-	return i.GetWith(key, IgnoreDeleted)
-}
+	opts = &TxOptions{}
+	require.Equal(t, TxMode(4), opts.WithMode(4).Mode)
+	require.Error(t, opts.Validate())
 
-func (i *dummyKeyIndex) GetWith(key []byte, filters ...FilterFn) (valRef ValueRef, err error) {
-	if i.closed {
-		return nil, ErrAlreadyClosed
-	}
-
-	return nil, ErrKeyNotFound
+	require.Equal(t, 1*time.Hour, opts.WithSnapshotRenewalPeriod(1*time.Hour).SnapshotRenewalPeriod)
+	require.EqualValues(t, 1, opts.WithSnapshotMustIncludeTxID(func(lastPrecommittedTxID uint64) uint64 { return 1 }).SnapshotMustIncludeTxID(100))
+	require.True(t, opts.WithUnsafeMVCC(true).UnsafeMVCC)
 }

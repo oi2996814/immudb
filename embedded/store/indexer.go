@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,11 +17,17 @@ limitations under the License.
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"math"
+	"math/rand"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/codenotary/immudb/embedded/tbtree"
@@ -30,11 +36,27 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+var ErrWriteStalling = errors.New("write stalling")
+
+const (
+	writeStallingSleepDurationMin = 10 * time.Millisecond
+	writeStallingSleepDurationMax = 50 * time.Millisecond
+)
+
 type indexer struct {
 	path string
 
 	store *ImmuStore
-	tx    *Tx
+
+	spec *IndexSpec
+
+	tx *Tx
+
+	maxBulkSize            int
+	bulkPreparationTimeout time.Duration
+
+	_kvs []*tbtree.KVT            //pre-allocated for multi-tx bulk indexing
+	_val [DefaultMaxValueLen]byte //pre-allocated buffer to read entry values while mapping
 
 	index *tbtree.TBtree
 
@@ -48,11 +70,13 @@ type indexer struct {
 	closed bool
 
 	compactionMutex sync.Mutex
-	mutex           sync.Mutex
+	rwmutex         sync.RWMutex
 
 	metricsLastCommittedTrx prometheus.Gauge
 	metricsLastIndexedTrx   prometheus.Gauge
 }
+
+type EntryMapper = func(key []byte, value []byte) ([]byte, error)
 
 type runningState = int
 
@@ -68,60 +92,136 @@ var (
 		Help: "The highest id of indexed transaction",
 	}, []string{
 		"db",
+		"index",
 	})
 	metricsLastCommittedTrx = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "immudb_last_committed_trx_id",
 		Help: "The highest id of committed transaction",
 	}, []string{
 		"db",
+		"index",
 	})
 )
 
-func newIndexer(path string, store *ImmuStore, indexOpts *tbtree.Options, maxWaitees int) (*indexer, error) {
+func newIndexer(path string, store *ImmuStore, opts *Options) (*indexer, error) {
+	if store == nil {
+		return nil, fmt.Errorf("%w: nil store", ErrIllegalArguments)
+	}
+
+	id := atomic.AddUint64(&store.nextIndexerID, 1)
+	if id-1 > math.MaxUint16 {
+		return nil, ErrMaxIndexersLimitExceeded
+	}
+
+	indexOpts := tbtree.DefaultOptions().
+		WithIdentifier(uint16(id - 1)).
+		WithReadOnly(opts.ReadOnly).
+		WithFileMode(opts.FileMode).
+		WithLogger(opts.logger).
+		WithFileSize(opts.FileSize).
+		WithCacheSize(opts.IndexOpts.CacheSize).
+		WithCache(store.indexCache).
+		WithFlushThld(opts.IndexOpts.FlushThld).
+		WithSyncThld(opts.IndexOpts.SyncThld).
+		WithFlushBufferSize(opts.IndexOpts.FlushBufferSize).
+		WithCleanupPercentage(opts.IndexOpts.CleanupPercentage).
+		WithMaxActiveSnapshots(opts.IndexOpts.MaxActiveSnapshots).
+		WithMaxNodeSize(opts.IndexOpts.MaxNodeSize).
+		WithMaxKeySize(opts.MaxKeyLen).
+		WithMaxValueSize(lszSize + offsetSize + sha256.Size + sszSize + maxTxMetadataLen + sszSize + maxKVMetadataLen). // indexed values
+		WithNodesLogMaxOpenedFiles(opts.IndexOpts.NodesLogMaxOpenedFiles).
+		WithHistoryLogMaxOpenedFiles(opts.IndexOpts.HistoryLogMaxOpenedFiles).
+		WithCommitLogMaxOpenedFiles(opts.IndexOpts.CommitLogMaxOpenedFiles).
+		WithRenewSnapRootAfter(opts.IndexOpts.RenewSnapRootAfter).
+		WithCompactionThld(opts.IndexOpts.CompactionThld).
+		WithDelayDuringCompaction(opts.IndexOpts.DelayDuringCompaction).
+		WithMaxBufferedDataSize(opts.IndexOpts.MaxBufferedDataSize).
+		WithOnFlushFunc(func(releasedDataSize int) {
+			store.memSemaphore.Release(uint64(releasedDataSize))
+		})
+
+	if opts.appFactory != nil {
+		indexOpts.WithAppFactory(tbtree.AppFactoryFunc(opts.appFactory))
+	}
+
+	if opts.appRemove != nil {
+		indexOpts.WithAppRemoveFunc(tbtree.AppRemoveFunc(opts.appRemove))
+	}
+
 	index, err := tbtree.Open(path, indexOpts)
 	if err != nil {
 		return nil, err
 	}
 
 	var wHub *watchers.WatchersHub
-	if maxWaitees > 0 {
-		wHub = watchers.New(0, maxWaitees)
+	if opts.MaxWaitees > 0 {
+		wHub = watchers.New(0, opts.MaxWaitees)
 	}
 
-	tx, err := store.fetchAllocTx()
-	if err != nil {
-		return nil, err
+	tx := NewTx(opts.MaxTxEntries, opts.MaxKeyLen)
+
+	kvs := make([]*tbtree.KVT, store.maxTxEntries*opts.IndexOpts.MaxBulkSize)
+	for i := range kvs {
+		// vLen + vOff + vHash + txmdLen + txmd + kvmdLen + kvmd
+		elen := lszSize + offsetSize + sha256.Size + sszSize + maxTxMetadataLen + sszSize + maxKVMetadataLen
+		kvs[i] = &tbtree.KVT{K: make([]byte, store.maxKeyLen), V: make([]byte, elen)}
 	}
 
 	indexer := &indexer{
-		store:     store,
-		tx:        tx,
-		path:      path,
-		index:     index,
-		wHub:      wHub,
-		state:     stopped,
-		stateCond: sync.NewCond(&sync.Mutex{}),
+		store:                  store,
+		tx:                     tx,
+		maxBulkSize:            opts.IndexOpts.MaxBulkSize,
+		bulkPreparationTimeout: opts.IndexOpts.BulkPreparationTimeout,
+		_kvs:                   kvs,
+		path:                   path,
+		index:                  index,
+		wHub:                   wHub,
+		state:                  stopped,
+		stateCond:              sync.NewCond(&sync.Mutex{}),
 	}
 
 	dbName := filepath.Base(store.path)
-	indexer.metricsLastIndexedTrx = metricsLastIndexedTrxId.WithLabelValues(dbName)
-	indexer.metricsLastCommittedTrx = metricsLastCommittedTrx.WithLabelValues(dbName)
-
-	indexer.resume()
+	idxName := filepath.Base(path)
+	indexer.metricsLastIndexedTrx = metricsLastIndexedTrxId.WithLabelValues(dbName, idxName)
+	indexer.metricsLastCommittedTrx = metricsLastCommittedTrx.WithLabelValues(dbName, idxName)
 
 	return indexer, nil
 }
 
+func (idx *indexer) init(spec *IndexSpec) {
+	idx.rwmutex.Lock()
+	defer idx.rwmutex.Unlock()
+
+	idx.spec = spec
+
+	idx.resume()
+}
+
+func (idx *indexer) SourcePrefix() []byte {
+	return idx.spec.SourcePrefix
+}
+
+func (idx *indexer) TargetPrefix() []byte {
+	return idx.spec.TargetPrefix
+}
+
 func (idx *indexer) Ts() uint64 {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	return idx.index.Ts()
 }
 
+func (idx *indexer) SyncSnapshot() (*tbtree.Snapshot, error) {
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
+
+	return idx.index.SyncSnapshot()
+}
+
 func (idx *indexer) Get(key []byte) (value []byte, tx uint64, hc uint64, err error) {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
 		return nil, 0, 0, ErrAlreadyClosed
@@ -130,9 +230,20 @@ func (idx *indexer) Get(key []byte) (value []byte, tx uint64, hc uint64, err err
 	return idx.index.Get(key)
 }
 
-func (idx *indexer) History(key []byte, offset uint64, descOrder bool, limit int) (txs []uint64, hCount uint64, err error) {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+func (idx *indexer) GetBetween(key []byte, initialTxID uint64, finalTxID uint64) (value []byte, tx uint64, hc uint64, err error) {
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
+
+	if idx.closed {
+		return nil, 0, 0, ErrAlreadyClosed
+	}
+
+	return idx.index.GetBetween(key, initialTxID, finalTxID)
+}
+
+func (idx *indexer) History(key []byte, offset uint64, descOrder bool, limit int) (timedValues []tbtree.TimedValue, hCount uint64, err error) {
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
 		return nil, 0, ErrAlreadyClosed
@@ -142,8 +253,11 @@ func (idx *indexer) History(key []byte, offset uint64, descOrder bool, limit int
 }
 
 func (idx *indexer) Snapshot() (*tbtree.Snapshot, error) {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+	idx.compactionMutex.Lock()
+	defer idx.compactionMutex.Unlock()
+
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
 		return nil, ErrAlreadyClosed
@@ -152,31 +266,34 @@ func (idx *indexer) Snapshot() (*tbtree.Snapshot, error) {
 	return idx.index.Snapshot()
 }
 
-func (idx *indexer) SnapshotSince(tx uint64) (*tbtree.Snapshot, error) {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+func (idx *indexer) SnapshotMustIncludeTxIDWithRenewalPeriod(ctx context.Context, txID uint64, renewalPeriod time.Duration) (*tbtree.Snapshot, error) {
+	idx.compactionMutex.Lock()
+	defer idx.compactionMutex.Unlock()
+
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
 		return nil, ErrAlreadyClosed
 	}
 
-	return idx.index.SnapshotSince(tx)
+	return idx.index.SnapshotMustIncludeTsWithRenewalPeriod(txID, renewalPeriod)
 }
 
-func (idx *indexer) ExistKeyWith(prefix []byte, neq []byte) (bool, error) {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+func (idx *indexer) GetWithPrefix(prefix []byte, neq []byte) (key []byte, value []byte, tx uint64, hc uint64, err error) {
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
-		return false, ErrAlreadyClosed
+		return nil, nil, 0, 0, ErrAlreadyClosed
 	}
 
-	return idx.index.ExistKeyWith(prefix, neq)
+	return idx.index.GetWithPrefix(prefix, neq)
 }
 
 func (idx *indexer) Sync() error {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
 		return ErrAlreadyClosed
@@ -189,8 +306,8 @@ func (idx *indexer) Close() error {
 	idx.compactionMutex.Lock()
 	defer idx.compactionMutex.Unlock()
 
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+	idx.rwmutex.RLock()
+	defer idx.rwmutex.RUnlock()
 
 	if idx.closed {
 		return ErrAlreadyClosed
@@ -198,17 +315,16 @@ func (idx *indexer) Close() error {
 
 	idx.stop()
 	idx.wHub.Close()
-	idx.store.releaseAllocTx(idx.tx)
 
 	idx.closed = true
 
 	return idx.index.Close()
 }
 
-func (idx *indexer) WaitForIndexingUpto(txID uint64, cancellation <-chan struct{}) error {
+func (idx *indexer) WaitForIndexingUpto(ctx context.Context, txID uint64) error {
 	if idx.wHub != nil {
-		err := idx.wHub.WaitFor(txID, cancellation)
-		if err == watchers.ErrAlreadyClosed {
+		err := idx.wHub.WaitFor(ctx, txID)
+		if errors.Is(err, watchers.ErrAlreadyClosed) {
 			return ErrAlreadyClosed
 		}
 		return err
@@ -221,20 +337,20 @@ func (idx *indexer) CompactIndex() (err error) {
 	idx.compactionMutex.Lock()
 	defer idx.compactionMutex.Unlock()
 
-	idx.store.logger.Infof("Compacting index '%s'...", idx.store.path)
+	idx.store.logger.Infof("compacting index '%s'...", idx.store.path)
 
 	defer func() {
 		if err == nil {
-			idx.store.logger.Infof("Index '%s' sucessfully compacted", idx.store.path)
-		} else if err == tbtree.ErrCompactionThresholdNotReached {
-			idx.store.logger.Infof("Compaction of index '%s' not needed: %v", idx.store.path, err)
+			idx.store.logger.Infof("index '%s' sucessfully compacted", idx.store.path)
+		} else if errors.Is(err, tbtree.ErrCompactionThresholdNotReached) {
+			idx.store.logger.Infof("compaction of index '%s' not needed: %v", idx.store.path, err)
 		} else {
 			idx.store.logger.Warningf("%v: while compacting index '%s'", err, idx.store.path)
 		}
 	}()
 
 	_, err = idx.index.Compact()
-	if err == tbtree.ErrAlreadyClosed {
+	if errors.Is(err, tbtree.ErrAlreadyClosed) {
 		return ErrAlreadyClosed
 	}
 	if err != nil {
@@ -249,7 +365,7 @@ func (idx *indexer) FlushIndex(cleanupPercentage float32, synced bool) (err erro
 	defer idx.compactionMutex.Unlock()
 
 	_, _, err = idx.index.FlushWith(cleanupPercentage, synced)
-	if err == tbtree.ErrAlreadyClosed {
+	if errors.Is(err, tbtree.ErrAlreadyClosed) {
 		return ErrAlreadyClosed
 	}
 	if err != nil {
@@ -266,7 +382,7 @@ func (idx *indexer) stop() {
 	idx.stateCond.L.Unlock()
 	idx.stateCond.Signal()
 
-	idx.store.notify(Info, true, "Indexing gracefully stopped at '%s'", idx.store.path)
+	idx.store.notify(Info, true, "indexing gracefully stopped at '%s'", idx.store.path)
 }
 
 func (idx *indexer) resume() {
@@ -276,12 +392,12 @@ func (idx *indexer) resume() {
 	go idx.doIndexing()
 	idx.stateCond.L.Unlock()
 
-	idx.store.notify(Info, true, "Indexing in progress at '%s'", idx.store.path)
+	idx.store.notify(Info, true, "indexing in progress at '%s'", idx.store.path)
 }
 
 func (idx *indexer) restartIndex() error {
-	idx.mutex.Lock()
-	defer idx.mutex.Unlock()
+	idx.rwmutex.Lock()
+	defer idx.rwmutex.Unlock()
 
 	if idx.closed {
 		return ErrAlreadyClosed
@@ -332,12 +448,12 @@ func (idx *indexer) doIndexing() {
 			idx.wHub.DoneUpto(lastIndexedTx)
 		}
 
-		err := idx.store.commitWHub.WaitFor(lastIndexedTx+1, idx.ctx.Done())
-		if err == watchers.ErrCancellationRequested || err == watchers.ErrAlreadyClosed {
+		err := idx.store.commitWHub.WaitFor(idx.ctx, lastIndexedTx+1)
+		if idx.ctx.Err() != nil || errors.Is(err, watchers.ErrAlreadyClosed) {
 			return
 		}
 		if err != nil {
-			idx.store.logger.Errorf("Indexing failed at '%s' due to error: %v", idx.store.path, err)
+			idx.store.logger.Errorf("indexing failed at '%s' due to error: %v", idx.store.path, err)
 			time.Sleep(60 * time.Second)
 		}
 
@@ -360,89 +476,271 @@ func (idx *indexer) doIndexing() {
 		}
 		idx.stateCond.L.Unlock()
 
-		err = idx.indexTx(lastIndexedTx + 1)
-		if err == ErrAlreadyClosed || err == tbtree.ErrAlreadyClosed {
+		err = idx.indexSince(lastIndexedTx + 1)
+		if errors.Is(err, ErrAlreadyClosed) || errors.Is(err, tbtree.ErrAlreadyClosed) {
 			return
 		}
-		if err != nil {
-			idx.store.logger.Errorf("Indexing failed at '%s' due to error: %v", idx.store.path, err)
+
+		if err != nil && !errors.Is(err, ErrWriteStalling) {
+			idx.store.logger.Errorf("indexing failed at '%s' due to error: %v", idx.store.path, err)
+			time.Sleep(60 * time.Second)
+		}
+
+		if err := idx.handleWriteStalling(err); err != nil {
+			idx.store.logger.Errorf("indexing failed at '%s' due to error: %v", idx.store.path, err)
 			time.Sleep(60 * time.Second)
 		}
 	}
 }
 
-func (idx *indexer) indexTx(txID uint64) error {
-	err := idx.store.readTx(txID, false, idx.tx)
-	if err != nil {
+func (idx *indexer) handleWriteStalling(err error) error {
+	if !errors.Is(err, ErrWriteStalling) {
+		return nil
+	}
+
+	if err := idx.store.FlushIndexes(0, false); err != nil {
 		return err
 	}
+	// NOSONAR   (rand is fine here)
+	sleepTime := writeStallingSleepDurationMin + time.Duration(rand.Intn(int(writeStallingSleepDurationMax-writeStallingSleepDurationMin+1)))
+	time.Sleep(sleepTime)
+	return nil
+}
 
-	txEntries := idx.tx.Entries()
-
-	var txmd []byte
-
-	if idx.tx.header.Metadata != nil {
-		txmd = idx.tx.header.Metadata.Bytes()
-	}
+func serializeIndexableEntry(b []byte, txmd []byte, e *TxEntry, kvmd []byte) int {
+	n := 0
 
 	txmdLen := len(txmd)
 
-	indexableEntries := 0
+	binary.BigEndian.PutUint32(b[n:], uint32(e.vLen))
+	n += lszSize
 
-	for _, e := range txEntries {
-		if e.md != nil && e.md.NonIndexable() {
-			continue
-		}
+	binary.BigEndian.PutUint64(b[n:], uint64(e.vOff))
+	n += offsetSize
 
-		// vLen + vOff + vHash + txmdLen + txmd + kvmdLen + kvmd
-		var b [lszSize + offsetSize + sha256.Size + sszSize + maxTxMetadataLen + sszSize + maxKVMetadataLen]byte
-		o := 0
+	copy(b[n:], e.hVal[:])
+	n += sha256.Size
 
-		binary.BigEndian.PutUint32(b[o:], uint32(e.vLen))
-		o += lszSize
+	binary.BigEndian.PutUint16(b[n:], uint16(txmdLen))
+	n += sszSize
 
-		binary.BigEndian.PutUint64(b[o:], uint64(e.vOff))
-		o += offsetSize
+	copy(b[n:], txmd)
+	n += txmdLen
 
-		copy(b[o:], e.hVal[:])
-		o += sha256.Size
+	kvmdLen := len(kvmd)
 
-		binary.BigEndian.PutUint16(b[o:], uint16(txmdLen))
-		o += sszSize
+	binary.BigEndian.PutUint16(b[n:], uint16(kvmdLen))
+	n += sszSize
 
-		copy(b[o:], txmd)
-		o += txmdLen
+	copy(b[n:], kvmd)
+	n += kvmdLen
 
-		var kvmd []byte
+	return n
+}
 
-		if e.md != nil {
-			kvmd = e.md.Bytes()
-		}
-
-		kvmdLen := len(kvmd)
-
-		binary.BigEndian.PutUint16(b[o:], uint16(kvmdLen))
-		o += sszSize
-
-		copy(b[o:], kvmd)
-		o += kvmdLen
-
-		idx.store._kvs[indexableEntries].K = e.key()
-		idx.store._kvs[indexableEntries].V = b[:o]
-
-		indexableEntries++
+func (idx *indexer) mapKey(key []byte, vLen int, vOff int64, hVal [sha256.Size]byte, mapper EntryMapper) (mappedKey []byte, err error) {
+	if mapper == nil {
+		return key, nil
 	}
 
+	buf := idx.valBuffer(vLen)
+	_, err = idx.store.readValueAt(buf, vOff, hVal, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return mapper(key, buf)
+}
+
+func (idx *indexer) valBuffer(vLen int) []byte {
+	if vLen > len(idx._val) {
+		return make([]byte, vLen)
+	}
+	return idx._val[:vLen]
+}
+
+func (idx *indexer) indexSince(txID uint64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), idx.bulkPreparationTimeout)
+	defer cancel()
+
+	acquiredMem := 0
+	bulkSize := 0
+	indexableEntries := 0
+
+	for i := 0; i < idx.maxBulkSize; i++ {
+		err := idx.store.readTx(txID+uint64(i), false, false, idx.tx)
+		if err != nil {
+			return err
+		}
+
+		txIndexedEntries := 0
+		txEntries := idx.tx.Entries()
+
+		var txmd []byte
+
+		if idx.tx.header.Metadata != nil {
+			txmd = idx.tx.header.Metadata.Bytes()
+		}
+
+		for _, e := range txEntries {
+			if e.md != nil && e.md.NonIndexable() {
+				continue
+			}
+
+			if !hasPrefix(e.key(), idx.spec.SourcePrefix) {
+				continue
+			}
+
+			sourceKey, err := idx.mapKey(e.key(), e.vLen, e.vOff, e.hVal, idx.spec.SourceEntryMapper)
+			if err != nil {
+				return err
+			}
+
+			targetKey, err := idx.mapKey(sourceKey, e.vLen, e.vOff, e.hVal, idx.spec.TargetEntryMapper)
+			if err != nil {
+				return err
+			}
+
+			if !hasPrefix(targetKey, idx.spec.TargetPrefix) {
+				return fmt.Errorf("%w: the target entry mapper has not generated a key with the specified target prefix", ErrIllegalArguments)
+			}
+
+			// vLen + vOff + vHash + txmdLen + txmd + kvmdLen + kvmds
+			var b [lszSize + offsetSize + sha256.Size + sszSize + maxTxMetadataLen + sszSize + maxKVMetadataLen]byte
+
+			var kvmd []byte
+
+			if e.Metadata() != nil {
+				kvmd = e.Metadata().Bytes()
+			}
+
+			n := serializeIndexableEntry(b[:], txmd, e, kvmd)
+
+			idx._kvs[indexableEntries].K = targetKey
+			idx._kvs[indexableEntries].V = b[:n]
+			idx._kvs[indexableEntries].T = txID + uint64(i)
+
+			indexableEntries++
+			txIndexedEntries++
+
+			if idx.spec.InjectiveMapping && txID > 1 {
+				// wait for source indexer to be up to date
+				sourceIndexer, err := idx.store.getIndexerFor(sourceKey)
+				if errors.Is(err, ErrIndexNotFound) {
+					continue
+				} else if err != nil {
+					return err
+				}
+
+				err = sourceIndexer.WaitForIndexingUpto(context.Background(), txID-1)
+				if err != nil {
+					return err
+				}
+
+				// the previous entry as of txID must be deleted from the target index
+				_, prevTxID, _, err := sourceIndexer.index.GetBetween(sourceKey, 1, txID-1)
+				if err == nil {
+					prevEntry, prevTxHdr, err := idx.store.ReadTxEntry(prevTxID, e.key(), false)
+					if err != nil {
+						return err
+					}
+
+					targetPrevKey, err := idx.mapKey(sourceKey, prevEntry.vLen, prevEntry.vOff, prevEntry.hVal, idx.spec.TargetEntryMapper)
+					if err != nil {
+						return err
+					}
+
+					if bytes.Equal(targetKey, targetPrevKey) {
+						continue
+					}
+
+					if !hasPrefix(targetPrevKey, idx.spec.TargetPrefix) {
+						return fmt.Errorf("%w: the target entry mapper has not generated a key with the specified target prefix", ErrIllegalArguments)
+					}
+
+					var txmd []byte
+
+					if prevTxHdr.Metadata != nil {
+						txmd = prevTxHdr.Metadata.Bytes()
+					}
+
+					var kvmd *KVMetadata
+
+					if prevEntry.Metadata() != nil {
+						kvmd = prevEntry.Metadata()
+					} else {
+						kvmd = NewKVMetadata()
+					}
+
+					kvmd.AsDeleted(true)
+					if err != nil {
+						return err
+					}
+
+					var b [lszSize + offsetSize + sha256.Size + sszSize + maxTxMetadataLen + sszSize + maxKVMetadataLen]byte
+
+					n := serializeIndexableEntry(b[:], txmd, prevEntry, kvmd.Bytes())
+
+					idx._kvs[indexableEntries].K = targetPrevKey
+					idx._kvs[indexableEntries].V = b[:n]
+					idx._kvs[indexableEntries].T = txID + uint64(i)
+
+					indexableEntries++
+					txIndexedEntries++
+				} else if !errors.Is(err, ErrKeyNotFound) {
+					return err
+				}
+			}
+		}
+
+		if indexableEntries > 0 && txIndexedEntries > 0 {
+			size := estimateEntriesSize(idx._kvs[indexableEntries-txIndexedEntries : indexableEntries])
+			if !idx.store.memSemaphore.Acquire(uint64(size)) {
+				if acquiredMem == 0 {
+					return ErrWriteStalling
+				}
+				break
+			}
+			acquiredMem += size
+		}
+
+		bulkSize++
+
+		if bulkSize < idx.maxBulkSize {
+			// wait for the next tx to be committed
+			err = idx.store.commitWHub.WaitFor(ctx, txID+uint64(i+1))
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	var err error
+
 	if indexableEntries == 0 {
-		err = idx.index.IncreaseTs(txID)
+		// if there are no entries to be indexed, the logical time in the tree
+		// is still moved forward to indicate up to what point has transaction
+		// indexing been completed
+		err = idx.index.IncreaseTs(txID + uint64(bulkSize-1))
 	} else {
-		err = idx.index.BulkInsert(idx.store._kvs[:indexableEntries])
+		err = idx.index.BulkInsert(idx._kvs[:indexableEntries])
 	}
 	if err != nil {
 		return err
 	}
 
-	idx.metricsLastIndexedTrx.Set(float64(txID))
+	idx.metricsLastIndexedTrx.Set(float64(txID + uint64(bulkSize-1)))
 
 	return nil
+}
+
+func estimateEntriesSize(kvs []*tbtree.KVT) int {
+	size := 0
+	for _, kv := range kvs {
+		size += len(kv.K) + len(kv.V) + 8
+	}
+	return size
 }

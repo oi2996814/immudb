@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,10 +24,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/codenotary/immudb/embedded/logger"
+	"github.com/codenotary/immudb/embedded/multierr"
 	"github.com/codenotary/immudb/embedded/sql"
 	"github.com/codenotary/immudb/pkg/auth"
 	"github.com/codenotary/immudb/pkg/database"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/codenotary/immudb/pkg/server/sessions/internal/transactions"
 )
 
@@ -55,7 +56,7 @@ type Manager interface {
 	GetTransactionFromContext(ctx context.Context) (transactions.Transaction, error)
 	GetSessionFromContext(ctx context.Context) (*Session, error)
 	DeleteTransaction(transactions.Transaction) error
-	CommitTransaction(transaction transactions.Transaction) ([]*sql.SQLTx, error)
+	CommitTransaction(ctx context.Context, transaction transactions.Transaction) ([]*sql.SQLTx, error)
 	RollbackTransaction(transaction transactions.Transaction) error
 }
 
@@ -103,7 +104,6 @@ func (sm *manager) NewSession(user *auth.User, db database.DB) (*Session, error)
 	}
 
 	sessionID := base64.URLEncoding.EncodeToString(randomBytes)
-
 	sm.sessions[sessionID] = NewSession(sessionID, user, db, sm.logger)
 	sm.logger.Debugf("created session %s", sessionID)
 
@@ -143,15 +143,19 @@ func (sm *manager) deleteSession(sessionID string) error {
 		return ErrSessionNotFound
 	}
 
-	err := sess.RollbackTransactions()
-	delete(sm.sessions, sessionID)
-	if err != nil {
-		return err
+	merr := multierr.NewMultiErr()
+
+	if err := sess.CloseDocumentReaders(); err != nil {
+		merr.Append(err)
 	}
 
-	sess.SetReadWriteTxOngoing(false)
+	if err := sess.RollbackTransactions(); err != nil {
+		merr.Append(err)
+	}
 
-	return nil
+	delete(sm.sessions, sessionID)
+
+	return merr.Reduce()
 }
 
 func (sm *manager) UpdateSessionActivityTime(sessionID string) {
@@ -302,12 +306,12 @@ func (sm *manager) DeleteTransaction(tx transactions.Transaction) error {
 	return sess.RemoveTransaction(tx.GetID())
 }
 
-func (sm *manager) CommitTransaction(tx transactions.Transaction) ([]*sql.SQLTx, error) {
+func (sm *manager) CommitTransaction(ctx context.Context, tx transactions.Transaction) ([]*sql.SQLTx, error) {
 	err := sm.DeleteTransaction(tx)
 	if err != nil {
 		return nil, err
 	}
-	cTxs, err := tx.Commit()
+	cTxs, err := tx.Commit(ctx)
 	if err != nil {
 		return nil, err
 	}

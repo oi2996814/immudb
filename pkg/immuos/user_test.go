@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,7 +33,8 @@ func TestStandardUser(t *testing.T) {
 	su.AddGroupF = func(name string) error {
 		return errAddGroup
 	}
-	require.Equal(t, errAddGroup, su.AddGroup("name"))
+	err := su.AddGroup("name")
+	require.ErrorIs(t, err, errAddGroup)
 	su.AddGroupF = addGroupFOK
 
 	// AddUser
@@ -42,7 +43,8 @@ func TestStandardUser(t *testing.T) {
 	su.AddUserF = func(usr string, group string) error {
 		return errAddUser
 	}
-	require.Equal(t, errAddUser, su.AddUser("usr", "group"))
+	err = su.AddUser("usr", "group")
+	require.ErrorIs(t, err, errAddUser)
 	su.AddUserF = addUserFOK
 
 	// LookupGroup ...
@@ -51,8 +53,8 @@ func TestStandardUser(t *testing.T) {
 	su.LookupGroupF = func(name string) (*user.Group, error) {
 		return nil, errLookupGroup
 	}
-	_, err := su.LookupGroup("name")
-	require.Equal(t, errLookupGroup, err)
+	_, err = su.LookupGroup("name")
+	require.ErrorIs(t, err, errLookupGroup)
 	su.LookupGroupF = lookupGroupFOK
 
 	// Lookup ...
@@ -62,6 +64,6 @@ func TestStandardUser(t *testing.T) {
 		return nil, errLookup
 	}
 	_, err = su.Lookup("username")
-	require.Equal(t, errLookup, err)
+	require.ErrorIs(t, err, errLookup)
 	su.LookupF = lookupFOK
 }

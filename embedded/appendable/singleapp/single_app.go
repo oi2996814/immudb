@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -45,6 +45,7 @@ var ErrBufferFull = errors.New("singleapp: buffer full")
 var ErrNegativeOffset = errors.New("singleapp: negative offset")
 
 const (
+	metaPreallocSize      = "PREALLOC_SIZE"
 	metaCompressionFormat = "COMPRESSION_FORMAT"
 	metaCompressionLevel  = "COMPRESSION_LEVEL"
 	metaWrappedMeta       = "WRAPPED_METADATA"
@@ -70,6 +71,8 @@ type AppendableFile struct {
 	compressionFormat int
 	compressionLevel  int
 
+	preallocSize int
+
 	metadata []byte
 
 	closed bool
@@ -94,7 +97,7 @@ func Open(fileName string, opts *Options) (*AppendableFile, error) {
 	_, err = os.Stat(fileName)
 	notExist := os.IsNotExist(err)
 
-	if err != nil && ((opts.readOnly && notExist) || !notExist) {
+	if err != nil && ((opts.readOnly && notExist) || (!opts.createIfNotExists && notExist) || !notExist) {
 		return nil, err
 	}
 
@@ -108,8 +111,11 @@ func Open(fileName string, opts *Options) (*AppendableFile, error) {
 	var compressionLevel int
 	var fileBaseOffset int64
 
+	var preallocSize int
+
 	if notExist {
 		m := appendable.NewMetadata(nil)
+		m.PutInt(metaPreallocSize, opts.preallocSize)
 		m.PutInt(metaCompressionFormat, opts.compressionFormat)
 		m.PutInt(metaCompressionLevel, opts.compressionLevel)
 		m.Put(metaWrappedMeta, opts.metadata)
@@ -130,6 +136,18 @@ func Open(fileName string, opts *Options) (*AppendableFile, error) {
 			return nil, err
 		}
 
+		preallocBs := make([]byte, 4096)
+		preallocated := 0
+
+		for preallocated < opts.preallocSize {
+			n, err := w.Write(preallocBs[:minInt(len(preallocBs), opts.preallocSize-preallocated)])
+			if err != nil {
+				return nil, err
+			}
+
+			preallocated += n
+		}
+
 		err = w.Flush()
 		if err != nil {
 			return nil, err
@@ -145,6 +163,7 @@ func Open(fileName string, opts *Options) (*AppendableFile, error) {
 			return nil, err
 		}
 
+		preallocSize = opts.preallocSize
 		compressionFormat = opts.compressionFormat
 		compressionLevel = opts.compressionLevel
 		metadata = opts.metadata
@@ -166,6 +185,11 @@ func Open(fileName string, opts *Options) (*AppendableFile, error) {
 		}
 
 		m := appendable.NewMetadata(mBs)
+
+		preallocSz, ok := m.GetInt(metaCompressionFormat)
+		if ok {
+			preallocSize = preallocSz
+		}
 
 		cf, ok := m.GetInt(metaCompressionFormat)
 		if !ok {
@@ -200,6 +224,7 @@ func Open(fileName string, opts *Options) (*AppendableFile, error) {
 		readBufferSize:    opts.readBufferSize,
 		compressionFormat: compressionFormat,
 		compressionLevel:  compressionLevel,
+		preallocSize:      preallocSize,
 		metadata:          metadata,
 		readOnly:          opts.readOnly,
 		retryableSync:     opts.retryableSync,
@@ -419,8 +444,8 @@ func (aof *AppendableFile) write(bs []byte) (n int, err error) {
 
 		if available == 0 {
 			if aof.retryableSync {
+				// Sync must be called to free buffer space
 				if !aof.autoSync {
-					// Sync must be called to free buffer space
 					return n, ErrBufferFull
 				}
 
@@ -654,23 +679,28 @@ func (aof *AppendableFile) sync() error {
 		return err
 	}
 
-	err = aof.f.Sync()
+	if aof.preallocSize == 0 {
+		err = aof.f.Sync()
+	} else {
+		err = fileutils.Fdatasync(aof.f)
+	}
+
 	if !aof.retryableSync {
 		return err
 	}
 
 	// retryableSync
+	// Buffer space is not freed when there is an error during sync
+
+	// prevent data lost when fsync fails
+	// buffered data may be re-written in following
+	// flushing and syncing calls.
 
 	if err == nil {
 		// buffer space is freed
 		aof.wbufFlushedOffset = 0
 		aof.wbufUnwrittenOffset = 0
 	} else {
-		// Buffer space is not freed when there is an error during sync
-
-		// prevent data lost when fsync fails
-		// buffered data may be re-written in following
-		// flushing and syncing calls.
 		aof.fileOffset -= int64(aof.wbufFlushedOffset)
 		aof.seekRequired = true
 

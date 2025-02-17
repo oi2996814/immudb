@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,6 +24,7 @@ import (
 
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/stream/streamtest"
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,8 +76,8 @@ func TestExecAllStreamSender_Send(t *testing.T) {
 func TestExecAllStreamSender_SendZAddError(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
 	s := streamtest.DefaultMsgSenderMock(sm, 4096)
-	s.SendF = func(reader io.Reader, payloadSize int) (err error) {
-		return errors.New("custom one")
+	s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
+		return errCustom
 	}
 	eas := NewExecAllStreamSender(s)
 
@@ -96,7 +97,7 @@ func TestExecAllStreamSender_SendZAddError(t *testing.T) {
 		},
 	}
 	err := eas.Send(aOps)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 }
 
 func TestExecAllStreamSender_SendZAddError2(t *testing.T) {
@@ -115,16 +116,16 @@ func TestExecAllStreamSender_SendZAddError2(t *testing.T) {
 		},
 	}
 	err := eas.Send(aOps)
-	require.Error(t, err)
+	require.ErrorContains(t, err, proto.ErrNil.Error())
 }
 
 func TestExecAllStreamSender_SendZAddError3(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
 	s := streamtest.DefaultMsgSenderMock(sm, 4096)
 	sec := false
-	s.SendF = func(reader io.Reader, payloadSize int) (err error) {
+	s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
 		if sec {
-			return errors.New("custom one")
+			return errCustom
 		}
 		sec = true
 		return nil
@@ -148,14 +149,14 @@ func TestExecAllStreamSender_SendZAddError3(t *testing.T) {
 		},
 	}
 	err := eas.Send(aOps)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 }
 
 func TestExecAllStreamSender_SendKVError(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
 	s := streamtest.DefaultMsgSenderMock(sm, 4096)
-	s.SendF = func(reader io.Reader, payloadSize int) (err error) {
-		return errors.New("custom one")
+	s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
+		return errCustom
 	}
 	eas := NewExecAllStreamSender(s)
 
@@ -178,13 +179,13 @@ func TestExecAllStreamSender_SendKVError(t *testing.T) {
 		},
 	}
 	err := eas.Send(aOps)
-	require.Error(t, err)
+	require.ErrorIs(t, err, errCustom)
 }
 
 func TestExecAllStreamSender_SendRefError(t *testing.T) {
 	sm := streamtest.DefaultImmuServiceSenderStreamMock()
 	s := streamtest.DefaultMsgSenderMock(sm, 4096)
-	s.SendF = func(reader io.Reader, payloadSize int) (err error) {
+	s.SendF = func(reader io.Reader, payloadSize int, metadata map[string][]byte) (err error) {
 		return errors.New("custom one")
 	}
 	eas := NewExecAllStreamSender(s)
@@ -197,5 +198,5 @@ func TestExecAllStreamSender_SendRefError(t *testing.T) {
 		},
 	}
 	err := eas.Send(aOps)
-	require.Equal(t, ErrRefOptNotImplemented, err.Error())
+	require.ErrorContains(t, err, ErrRefOptNotImplemented)
 }

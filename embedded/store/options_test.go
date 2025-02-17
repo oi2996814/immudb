@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -36,10 +36,12 @@ func TestInvalidOptions(t *testing.T) {
 		{"MaxConcurrency", DefaultOptions().WithMaxConcurrency(0)},
 		{"WriteBufferSize", DefaultOptions().WithWriteBufferSize(0)},
 		{"SyncFrequency", DefaultOptions().WithSyncFrequency(-1)},
+		{"MaxActiveTransactions", DefaultOptions().WithMaxActiveTransactions(0)},
+		{"MVCCReadSetLimit", DefaultOptions().WithMVCCReadSetLimit(0)},
 		{"MaxIOConcurrency", DefaultOptions().WithMaxIOConcurrency(0)},
 		{"MaxIOConcurrency-max", DefaultOptions().WithMaxIOConcurrency(MaxParallelIO + 1)},
-		{"MaxLinearProofLen", DefaultOptions().WithMaxLinearProofLen(-1)},
 		{"TxLogCacheSize", DefaultOptions().WithTxLogCacheSize(-1)},
+		{"VLogCacheSize", DefaultOptions().WithVLogCacheSize(-1)},
 		{"VLogMaxOpenedFiles", DefaultOptions().WithVLogMaxOpenedFiles(0)},
 		{"TxLogMaxOpenedFiles", DefaultOptions().WithTxLogMaxOpenedFiles(0)},
 		{"CommitLogMaxOpenedFiles", DefaultOptions().WithCommitLogMaxOpenedFiles(0)},
@@ -76,11 +78,16 @@ func TestInvalidIndexOptions(t *testing.T) {
 		{"MaxActiveSnapshots", DefaultIndexOptions().WithMaxActiveSnapshots(0)},
 		{"MaxNodeSize", DefaultIndexOptions().WithMaxNodeSize(0)},
 		{"RenewSnapRootAfter", DefaultIndexOptions().WithRenewSnapRootAfter(-1)},
+		{"MaxBulkSize", DefaultIndexOptions().WithMaxBulkSize(0)},
+		{"BulkPreparationTimeout", DefaultIndexOptions().WithBulkPreparationTimeout(-1)},
 		{"CompactionThld", DefaultIndexOptions().WithCompactionThld(0)},
 		{"DelayDuringCompaction", DefaultIndexOptions().WithDelayDuringCompaction(-1)},
 		{"NodesLogMaxOpenedFiles", DefaultIndexOptions().WithNodesLogMaxOpenedFiles(0)},
 		{"HistoryLogMaxOpenedFiles", DefaultIndexOptions().WithHistoryLogMaxOpenedFiles(0)},
 		{"CommitLogMaxOpenedFiles", DefaultIndexOptions().WithCommitLogMaxOpenedFiles(0)},
+		{"MaxGlobalBufferedDataSize", DefaultIndexOptions().WithMaxGlobalBufferedDataSize(0)},
+		{"MaxGlobalBufferedDataSize", DefaultIndexOptions().WithMaxGlobalBufferedDataSize(DefaultIndexOptions().MaxBufferedDataSize - 1)},
+		{"MaxBufferedDataSize", DefaultIndexOptions().WithMaxBufferedDataSize(0)},
 	} {
 		t.Run(d.n, func(t *testing.T) {
 			require.ErrorIs(t, d.opts.Validate(), ErrInvalidOptions)
@@ -120,15 +127,17 @@ func TestValidOptions(t *testing.T) {
 	require.Equal(t, DefaultFileSize, opts.WithFileSize(DefaultFileSize).FileSize)
 	require.Equal(t, DefaultSyncFrequency, opts.WithSyncFrequency(DefaultSyncFrequency).SyncFrequency)
 	require.Equal(t, DefaultMaxActiveTransactions, opts.WithMaxActiveTransactions(DefaultMaxActiveTransactions).MaxActiveTransactions)
+	require.Equal(t, DefaultMVCCReadSetLimit, opts.WithMVCCReadSetLimit(DefaultMVCCReadSetLimit).MVCCReadSetLimit)
 	require.Equal(t, DefaultMaxIOConcurrency, opts.WithMaxIOConcurrency(DefaultMaxIOConcurrency).MaxIOConcurrency)
 	require.Equal(t, DefaultMaxKeyLen, opts.WithMaxKeyLen(DefaultMaxKeyLen).MaxKeyLen)
-	require.Equal(t, DefaultMaxLinearProofLen, opts.WithMaxLinearProofLen(DefaultMaxLinearProofLen).MaxLinearProofLen)
 	require.Equal(t, DefaultMaxTxEntries, opts.WithMaxTxEntries(DefaultMaxTxEntries).MaxTxEntries)
 	require.Equal(t, DefaultMaxValueLen, opts.WithMaxValueLen(DefaultMaxValueLen).MaxValueLen)
 	require.Equal(t, DefaultTxLogCacheSize, opts.WithTxLogCacheSize(DefaultOptions().TxLogCacheSize).TxLogCacheSize)
+	require.Equal(t, DefaultVLogCacheSize, opts.WithVLogCacheSize(DefaultOptions().VLogCacheSize).VLogCacheSize)
 	require.Equal(t, 2, opts.WithTxLogMaxOpenedFiles(2).TxLogMaxOpenedFiles)
 	require.Equal(t, 3, opts.WithVLogMaxOpenedFiles(3).VLogMaxOpenedFiles)
 	require.Equal(t, DefaultMaxWaitees, opts.WithMaxWaitees(DefaultMaxWaitees).MaxWaitees)
+	require.Equal(t, DefaultEmbeddedValues, opts.WithEmbeddedValues(DefaultEmbeddedValues).EmbeddedValues)
 
 	timeFun := func() time.Time {
 		return time.Now()
@@ -179,6 +188,9 @@ func TestValidOptions(t *testing.T) {
 	require.Equal(t, 4096, indexOpts.WithMaxNodeSize(4096).MaxNodeSize)
 	require.Equal(t, time.Duration(1000)*time.Millisecond,
 		indexOpts.WithRenewSnapRootAfter(time.Duration(1000)*time.Millisecond).RenewSnapRootAfter)
+	require.Equal(t, 1_000, indexOpts.WithMaxBulkSize(1_000).MaxBulkSize)
+	require.Equal(t, time.Duration(500)*time.Millisecond,
+		indexOpts.WithBulkPreparationTimeout(time.Duration(500)*time.Millisecond).BulkPreparationTimeout)
 	require.Equal(t, 10, indexOpts.WithNodesLogMaxOpenedFiles(10).NodesLogMaxOpenedFiles)
 	require.Equal(t, 11, indexOpts.WithHistoryLogMaxOpenedFiles(11).HistoryLogMaxOpenedFiles)
 	require.Equal(t, 12, indexOpts.WithCommitLogMaxOpenedFiles(12).CommitLogMaxOpenedFiles)
@@ -186,6 +198,8 @@ func TestValidOptions(t *testing.T) {
 	require.Equal(t, 1*time.Millisecond, indexOpts.WithDelayDuringCompaction(1*time.Millisecond).DelayDuringCompaction)
 	require.Equal(t, 4096*2, indexOpts.WithFlushBufferSize(4096*2).FlushBufferSize)
 	require.Equal(t, float32(10), indexOpts.WithCleanupPercentage(10).CleanupPercentage)
+	require.Equal(t, int(10), indexOpts.WithMaxBufferedDataSize(10).MaxBufferedDataSize)
+	require.Equal(t, int(10), indexOpts.WithMaxGlobalBufferedDataSize(10).MaxGlobalBufferedDataSize)
 
 	require.Nil(t, opts.WithAHTOptions(nil).AHTOpts)
 	require.ErrorIs(t, opts.Validate(), ErrInvalidOptions)

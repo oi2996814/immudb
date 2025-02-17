@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,6 @@ package server
 import (
 	"context"
 	"errors"
-	"io/ioutil"
-	"os"
 	"testing"
 
 	"github.com/codenotary/immudb/pkg/api/schema"
@@ -31,9 +29,7 @@ import (
 )
 
 func TestExportTxEdgeCases(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	serverOptions := DefaultOptions().
 		WithDir(dir).
@@ -44,11 +40,11 @@ func TestExportTxEdgeCases(t *testing.T) {
 
 	s.Initialize()
 
-	err = s.ExportTx(nil, nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	err := s.ExportTx(nil, nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	err = s.ExportTx(&schema.ExportTxRequest{Tx: 1}, &immuServiceExportTxServer{})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotLoggedIn)
 
 	ctx := context.Background()
 
@@ -62,16 +58,14 @@ func TestExportTxEdgeCases(t *testing.T) {
 	ctx = metadata.NewIncomingContext(context.Background(), md)
 
 	err = s.ExportTx(&schema.ExportTxRequest{Tx: 0}, &immuServiceExportTxServer{})
-	require.Equal(t, ErrIllegalArguments, err)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	err = s.ExportTx(&schema.ExportTxRequest{Tx: 1}, &immuServiceExportTxServer{})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotLoggedIn)
 }
 
 func TestReplicateTxEdgeCases(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	serverOptions := DefaultOptions().
 		WithDir(dir).
@@ -82,11 +76,11 @@ func TestReplicateTxEdgeCases(t *testing.T) {
 
 	s.Initialize()
 
-	err = s.ReplicateTx(nil)
-	require.Equal(t, ErrIllegalArguments, err)
+	err := s.ReplicateTx(nil)
+	require.ErrorIs(t, err, ErrIllegalArguments)
 
 	err = s.ReplicateTx(&immuServiceReplicateTxServer{ctx: context.Background()})
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrNotLoggedIn)
 
 	ctx := context.Background()
 
@@ -102,7 +96,7 @@ func TestReplicateTxEdgeCases(t *testing.T) {
 	stream := &immuServiceReplicateTxServer{ctx: ctx}
 
 	err = s.ReplicateTx(stream)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "error")
 }
 
 type immuServiceExportTxServer struct {
@@ -122,7 +116,7 @@ func (s *immuServiceExportTxServer) Recv() (*schema.Chunk, error) {
 }
 
 func (s *immuServiceExportTxServer) Context() context.Context {
-	return context.TODO()
+	return context.Background()
 }
 
 type immuServiceReplicateTxServer struct {

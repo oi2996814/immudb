@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,6 +43,22 @@ var maintenanceMethods = map[string]struct{}{
 	"ListTables":          {},
 	"DescribeTable":       {},
 	"VerifiableSQLGet":    {},
+	"CreateCollection":    {},
+	"GetCollection":       {},
+	"GetCollections":      {},
+	"UpdateCollection":    {},
+	"DeleteCollection":    {},
+	"AddField":            {},
+	"RemoveField":         {},
+	"CreateIndex":         {},
+	"DeleteIndex":         {},
+	"InsertDocuments":     {},
+	"ReplaceDocuments":    {},
+	"DeleteDocuments":     {},
+	"SearchDocuments":     {},
+	"CountDocuments":      {},
+	"AuditDocument":       {},
+	"ProofDocument":       {},
 
 	// admin methods
 	"ListUsers":    {},
@@ -105,6 +121,23 @@ var methodsPermissions = map[string][]uint32{
 	"DescribeTable":          {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
 	"VerifiableSQLGet":       {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
 
+	"CreateCollection": {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"GetCollection":    {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
+	"GetCollections":   {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
+	"UpdateCollection": {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"DeleteCollection": {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"AddField":         {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"RemoveField":      {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"CreateIndex":      {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"DeleteIndex":      {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"InsertDocuments":  {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"ReplaceDocuments": {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"DeleteDocuments":  {PermissionSysAdmin, PermissionAdmin, PermissionRW},
+	"SearchDocuments":  {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
+	"CountDocuments":   {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
+	"AuditDocument":    {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
+	"ProofDocument":    {PermissionSysAdmin, PermissionAdmin, PermissionRW, PermissionR},
+
 	// admin methods
 	"ListUsers":        {PermissionSysAdmin, PermissionAdmin},
 	"CreateUser":       {PermissionSysAdmin, PermissionAdmin},
@@ -125,7 +158,7 @@ var methodsPermissions = map[string][]uint32{
 	"ReplicateTx":      {PermissionSysAdmin, PermissionAdmin},
 }
 
-//HasPermissionForMethod checks if userPermission can access method name
+// HasPermissionForMethod checks if userPermission can access method name
 func HasPermissionForMethod(userPermission uint32, method string) bool {
 	methodPermissions, ok := methodsPermissions[method]
 	if !ok {

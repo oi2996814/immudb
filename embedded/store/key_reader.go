@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 
 type Snapshot struct {
 	st             *ImmuStore
+	prefix         []byte
 	snap           *tbtree.Snapshot
 	ts             time.Time
 	refInterceptor valueRefInterceptor
@@ -55,36 +57,52 @@ var (
 	}
 )
 
-type KeyReader struct {
-	snap           *Snapshot
-	reader         *tbtree.Reader
-	filters        []FilterFn
-	refInterceptor valueRefInterceptor
-
-	offset  uint64
-	skipped uint64
+type KeyReader interface {
+	Read(ctx context.Context) (key []byte, val ValueRef, err error)
+	ReadBetween(ctx context.Context, initialTxID uint64, finalTxID uint64) (key []byte, val ValueRef, err error)
+	Reset() error
+	Close() error
 }
 
 type KeyReaderSpec struct {
-	SeekKey       []byte
-	EndKey        []byte
-	Prefix        []byte
-	InclusiveSeek bool
-	InclusiveEnd  bool
-	DescOrder     bool
-	Filters       []FilterFn
-	Offset        uint64
+	SeekKey        []byte
+	EndKey         []byte
+	Prefix         []byte
+	InclusiveSeek  bool
+	InclusiveEnd   bool
+	IncludeHistory bool
+	DescOrder      bool
+	Filters        []FilterFn
+	Offset         uint64
 }
 
 func (s *Snapshot) set(key, value []byte) error {
 	return s.snap.Set(key, value)
 }
 
-func (s *Snapshot) Get(key []byte) (valRef ValueRef, err error) {
-	return s.GetWith(key, IgnoreExpired, IgnoreDeleted)
+func (s *Snapshot) Get(ctx context.Context, key []byte) (valRef ValueRef, err error) {
+	return s.GetWithFilters(ctx, key, IgnoreExpired, IgnoreDeleted)
 }
 
-func (s *Snapshot) GetWith(key []byte, filters ...FilterFn) (valRef ValueRef, err error) {
+func (s *Snapshot) GetBetween(ctx context.Context, key []byte, initialTxID, finalTxID uint64) (valRef ValueRef, err error) {
+	indexedVal, tx, hc, err := s.snap.GetBetween(key, initialTxID, finalTxID)
+	if err != nil {
+		return nil, err
+	}
+
+	valRef, err = s.st.valueRefFrom(tx, hc, indexedVal)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.refInterceptor != nil {
+		return s.refInterceptor(key, valRef), nil
+	}
+
+	return valRef, nil
+}
+
+func (s *Snapshot) GetWithFilters(ctx context.Context, key []byte, filters ...FilterFn) (valRef ValueRef, err error) {
 	indexedVal, tx, hc, err := s.snap.Get(key)
 	if err != nil {
 		return nil, err
@@ -113,12 +131,61 @@ func (s *Snapshot) GetWith(key []byte, filters ...FilterFn) (valRef ValueRef, er
 	return valRef, nil
 }
 
-func (s *Snapshot) ExistKeyWith(prefix []byte, neq []byte) (bool, error) {
-	return s.snap.ExistKeyWith(prefix, neq)
+func (s *Snapshot) GetWithPrefix(ctx context.Context, prefix []byte, neq []byte) (key []byte, valRef ValueRef, err error) {
+	return s.GetWithPrefixAndFilters(ctx, prefix, neq, IgnoreExpired, IgnoreDeleted)
 }
 
-func (s *Snapshot) History(key []byte, offset uint64, descOrder bool, limit int) (tss []uint64, hCount uint64, err error) {
-	return s.snap.History(key, offset, descOrder, limit)
+func (s *Snapshot) GetWithPrefixAndFilters(ctx context.Context, prefix []byte, neq []byte, filters ...FilterFn) (key []byte, valRef ValueRef, err error) {
+	key, indexedVal, tx, hc, err := s.snap.GetWithPrefix(prefix, neq)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	valRef, err = s.st.valueRefFrom(tx, hc, indexedVal)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, filter := range filters {
+		if filter == nil {
+			return nil, nil, fmt.Errorf("%w: invalid filter function", ErrIllegalArguments)
+		}
+
+		err = filter(valRef, s.ts)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if s.refInterceptor != nil {
+		return key, s.refInterceptor(key, valRef), nil
+	}
+
+	return key, valRef, nil
+}
+
+func (s *Snapshot) History(key []byte, offset uint64, descOrder bool, limit int) (valRefs []ValueRef, hCount uint64, err error) {
+	timedValues, hCount, err := s.snap.History(key, offset, descOrder, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	valRefs = make([]ValueRef, len(timedValues))
+
+	for i, timedValue := range timedValues {
+		valRef, err := s.st.valueRefFrom(timedValue.Ts, hCount-uint64(i), timedValue.Value)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if s.refInterceptor != nil {
+			valRef = s.refInterceptor(key, valRef)
+		}
+
+		valRefs[i] = valRef
+	}
+
+	return valRefs, hCount, nil
 }
 
 func (s *Snapshot) Ts() uint64 {
@@ -129,18 +196,15 @@ func (s *Snapshot) Close() error {
 	return s.snap.Close()
 }
 
-func (s *Snapshot) NewKeyReader(spec *KeyReaderSpec) (*KeyReader, error) {
-	if spec == nil {
-		return nil, ErrIllegalArguments
-	}
-
-	r, err := s.snap.NewReader(&tbtree.ReaderSpec{
-		SeekKey:       spec.SeekKey,
-		EndKey:        spec.EndKey,
-		Prefix:        spec.Prefix,
-		InclusiveSeek: spec.InclusiveSeek,
-		InclusiveEnd:  spec.InclusiveEnd,
-		DescOrder:     spec.DescOrder,
+func (s *Snapshot) NewKeyReader(spec KeyReaderSpec) (KeyReader, error) {
+	r, err := s.snap.NewReader(tbtree.ReaderSpec{
+		SeekKey:        spec.SeekKey,
+		EndKey:         spec.EndKey,
+		Prefix:         spec.Prefix,
+		InclusiveSeek:  spec.InclusiveSeek,
+		InclusiveEnd:   spec.InclusiveEnd,
+		IncludeHistory: spec.IncludeHistory,
+		DescOrder:      spec.DescOrder,
 	})
 	if err != nil {
 		return nil, err
@@ -162,10 +226,11 @@ func (s *Snapshot) NewKeyReader(spec *KeyReaderSpec) (*KeyReader, error) {
 		}
 	}
 
-	return &KeyReader{
+	return &storeKeyReader{
 		snap:           s,
 		reader:         r,
 		filters:        spec.Filters,
+		includeHistory: spec.IncludeHistory,
 		refInterceptor: refInterceptor,
 		offset:         spec.Offset,
 	}, nil
@@ -179,12 +244,13 @@ type ValueRef interface {
 	KVMetadata() *KVMetadata
 	HVal() [sha256.Size]byte
 	Len() uint32
+	VOff() int64
 }
 
 type valueRef struct {
 	tx     uint64
 	hc     uint64 // version
-	hVal   [32]byte
+	hVal   [sha256.Size]byte
 	vOff   int64
 	valLen uint32
 	txmd   *TxMetadata
@@ -230,7 +296,7 @@ func (st *ImmuStore) valueRefFrom(tx, hc uint64, indexedVal []byte) (ValueRef, e
 		}
 
 		if txmdLen > 0 {
-			txmd = &TxMetadata{}
+			txmd = NewTxMetadata()
 
 			err := txmd.ReadFrom(indexedVal[i : i+txmdLen])
 			if err != nil {
@@ -281,7 +347,16 @@ func (v *valueRef) Resolve() (val []byte, err error) {
 		return nil, ErrExpiredEntry
 	}
 
-	_, err = v.st.readValueAt(refVal, v.vOff, v.hVal)
+	if v.valLen == 0 {
+		// while not required, nil is returned instead of an empty slice
+
+		// TODO: this step should be done after reading the value to ensure proper validations are made
+		// But current changes in ExportTx with truncated transactions are not providing the value length
+		// for truncated transactions
+		return nil, nil
+	}
+
+	_, err = v.st.readValueAt(refVal, v.vOff, v.hVal, false)
 	if err != nil {
 		return nil, err
 	}
@@ -313,42 +388,49 @@ func (v *valueRef) Len() uint32 {
 	return v.valLen
 }
 
-func (r *KeyReader) ReadBetween(initialTxID, finalTxID uint64) (key []byte, val ValueRef, tx uint64, err error) {
+func (v *valueRef) VOff() int64 {
+	return v.vOff
+}
+
+type storeKeyReader struct {
+	snap           *Snapshot
+	reader         *tbtree.Reader
+	filters        []FilterFn
+	includeHistory bool
+
+	refInterceptor valueRefInterceptor
+
+	offset  uint64
+	skipped uint64
+}
+
+func (r *storeKeyReader) ReadBetween(ctx context.Context, initialTxID, finalTxID uint64) (key []byte, val ValueRef, err error) {
 	for {
-		key, ktxID, hc, err := r.reader.ReadBetween(initialTxID, finalTxID)
+		key, indexedVal, tx, hc, err := r.reader.ReadBetween(initialTxID, finalTxID)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, err
 		}
 
-		e, header, err := r.snap.st.ReadTxEntry(ktxID, key)
+		val, err = r.snap.st.valueRefFrom(tx, hc, indexedVal)
 		if err != nil {
-			return nil, nil, 0, err
-		}
-
-		val = &valueRef{
-			tx:     header.ID,
-			hc:     hc,
-			hVal:   e.hVal,
-			vOff:   int64(e.vOff),
-			valLen: uint32(e.vLen),
-			txmd:   header.Metadata,
-			kvmd:   e.md,
-			st:     r.snap.st,
+			return nil, nil, err
 		}
 
 		valRef := r.refInterceptor(key, val)
 
-		skipEntry := false
+		filterEntry := false
 
-		for _, filter := range r.filters {
-			err = filter(valRef, r.snap.ts)
-			if err != nil {
-				skipEntry = true
-				break
+		if !r.includeHistory {
+			for _, filter := range r.filters {
+				err = filter(valRef, r.snap.ts)
+				if err != nil {
+					filterEntry = true
+					break
+				}
 			}
 		}
 
-		if skipEntry {
+		if filterEntry {
 			continue
 		}
 
@@ -357,11 +439,11 @@ func (r *KeyReader) ReadBetween(initialTxID, finalTxID uint64) (key []byte, val 
 			continue
 		}
 
-		return key, valRef, ktxID, nil
+		return key, valRef, nil
 	}
 }
 
-func (r *KeyReader) Read() (key []byte, val ValueRef, err error) {
+func (r *storeKeyReader) Read(ctx context.Context) (key []byte, val ValueRef, err error) {
 	for {
 		key, indexedVal, tx, hc, err := r.reader.Read()
 		if err != nil {
@@ -375,17 +457,19 @@ func (r *KeyReader) Read() (key []byte, val ValueRef, err error) {
 
 		valRef := r.refInterceptor(key, val)
 
-		skipEntry := false
+		filterEntry := false
 
-		for _, filter := range r.filters {
-			err = filter(valRef, r.snap.ts)
-			if err != nil {
-				skipEntry = true
-				break
+		if !r.includeHistory {
+			for _, filter := range r.filters {
+				err = filter(valRef, r.snap.ts)
+				if err != nil {
+					filterEntry = true
+					break
+				}
 			}
 		}
 
-		if skipEntry {
+		if filterEntry {
 			continue
 		}
 
@@ -398,12 +482,17 @@ func (r *KeyReader) Read() (key []byte, val ValueRef, err error) {
 	}
 }
 
-func (r *KeyReader) Reset() error {
+func (r *storeKeyReader) Reset() error {
+	err := r.reader.Reset()
+	if err != nil {
+		return err
+	}
+
 	r.skipped = 0
 
-	return r.reader.Reset()
+	return nil
 }
 
-func (r *KeyReader) Close() error {
+func (r *storeKeyReader) Close() error {
 	return r.reader.Close()
 }

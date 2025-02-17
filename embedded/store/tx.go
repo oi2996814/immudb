@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	"github.com/codenotary/immudb/embedded/appendable"
 	"github.com/codenotary/immudb/embedded/htree"
@@ -49,7 +50,7 @@ type TxHeader struct {
 	Eh       [sha256.Size]byte
 }
 
-func newTx(nentries int, maxKeyLen int) *Tx {
+func NewTx(nentries int, maxKeyLen int) *Tx {
 	entries := make([]*TxEntry, nentries)
 
 	keyBuffer := make([]byte, maxKeyLen*nentries)
@@ -78,10 +79,11 @@ func NewTxWithEntries(header *TxHeader, entries []*TxEntry) *Tx {
 func (tx *Tx) Header() *TxHeader {
 	var txmd *TxMetadata
 
-	if tx.header.Metadata != nil {
-		txmd = &TxMetadata{}
+	if tx.header.Metadata == nil {
+		txmd = NewTxMetadata()
+	} else {
+		txmd = tx.header.Metadata
 	}
-
 	return &TxHeader{
 		ID:      tx.header.ID,
 		Ts:      tx.header.Ts,
@@ -205,7 +207,7 @@ func (hdr *TxHeader) ReadFrom(b []byte) error {
 			}
 
 			if mdLen > 0 {
-				hdr.Metadata = &TxMetadata{}
+				hdr.Metadata = NewTxMetadata()
 
 				err := hdr.Metadata.ReadFrom(b[i : i+mdLen])
 				if err != nil {
@@ -347,12 +349,7 @@ func (tx *Tx) BuildHashTree() error {
 		return err
 	}
 
-	root, err := tx.htree.Root()
-	if err != nil {
-		return err
-	}
-
-	tx.header.Eh = root
+	tx.header.Eh = tx.htree.Root()
 
 	return nil
 }
@@ -388,8 +385,8 @@ func (tx *Tx) Proof(key []byte) (*htree.InclusionProof, error) {
 	return tx.htree.InclusionProof(kindex)
 }
 
-func (tx *Tx) readFrom(r *appendable.Reader) error {
-	tdr := &txDataReader{r: r}
+func (tx *Tx) readFrom(r *appendable.Reader, skipIntegrityCheck bool) error {
+	tdr := &txDataReader{r: r, skipIntegrityCheck: skipIntegrityCheck}
 
 	header, err := tdr.readHeader(len(tx.entries))
 	if err != nil {
@@ -414,10 +411,11 @@ func (tx *Tx) readFrom(r *appendable.Reader) error {
 }
 
 type txDataReader struct {
-	r          *appendable.Reader
-	h          *TxHeader
-	digests    [][sha256.Size]byte
-	digestFunc TxEntryDigest
+	r                  *appendable.Reader
+	h                  *TxHeader
+	digests            [][sha256.Size]byte
+	digestFunc         TxEntryDigest
+	skipIntegrityCheck bool
 }
 
 func (t *txDataReader) readHeader(maxEntries int) (*TxHeader, error) {
@@ -427,6 +425,11 @@ func (t *txDataReader) readHeader(maxEntries int) (*TxHeader, error) {
 	if err != nil {
 		return nil, err
 	}
+	if id == 0 {
+		// underlying file may be preallocated
+		return nil, io.EOF
+	}
+
 	header.ID = id
 
 	ts, err := t.r.ReadUint64()
@@ -487,7 +490,7 @@ func (t *txDataReader) readHeader(maxEntries int) (*TxHeader, error) {
 					return nil, err
 				}
 
-				txmd = &TxMetadata{}
+				txmd = NewTxMetadata()
 
 				err = txmd.ReadFrom(mdBs[:mdLen])
 				if err != nil {
@@ -514,12 +517,15 @@ func (t *txDataReader) readHeader(maxEntries int) (*TxHeader, error) {
 	}
 
 	t.h = header
-	t.digestFunc, err = header.TxEntryDigest()
-	if err != nil {
-		return nil, err
-	}
 
-	t.digests = make([][sha256.Size]byte, 0, header.NEntries)
+	if !t.skipIntegrityCheck {
+		t.digestFunc, err = header.TxEntryDigest()
+		if err != nil {
+			return nil, err
+		}
+
+		t.digests = make([][sha256.Size]byte, 0, header.NEntries)
+	}
 
 	return header, nil
 }
@@ -585,21 +591,28 @@ func (t *txDataReader) readEntry(entry *TxEntry) error {
 
 	entry.readonly = true
 
-	digest, err := t.digestFunc(entry)
-	if err != nil {
-		return err
+	if !t.skipIntegrityCheck {
+		digest, err := t.digestFunc(entry)
+		if err != nil {
+			return err
+		}
+		t.digests = append(t.digests, digest)
 	}
-
-	t.digests = append(t.digests, digest)
 
 	return nil
 }
 
 func (t *txDataReader) buildAndValidateHtree(htree *htree.HTree) error {
+	// it's better to consume alh from appendable even if it's not validated
+	// as seuqential tx reading can be done
 	var alh [sha256.Size]byte
 	_, err := t.r.Read(alh[:])
 	if err != nil {
 		return err
+	}
+
+	if t.skipIntegrityCheck {
+		return nil
 	}
 
 	err = htree.BuildWith(t.digests)
@@ -607,15 +620,10 @@ func (t *txDataReader) buildAndValidateHtree(htree *htree.HTree) error {
 		return err
 	}
 
-	root, err := htree.Root()
-	if err != nil {
-		return err
-	}
-
-	t.h.Eh = root
+	t.h.Eh = htree.Root()
 
 	if t.h.Alh() != alh {
-		return fmt.Errorf("%w: ALH mismatch at tx %d", ErrorCorruptedTxData, t.h.ID)
+		return fmt.Errorf("%w: ALH mismatch at tx %d", ErrCorruptedTxData, t.h.ID)
 	}
 
 	return nil

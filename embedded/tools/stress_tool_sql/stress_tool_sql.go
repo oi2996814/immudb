@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"math/rand"
@@ -120,7 +121,6 @@ func main() {
 		WithCommitLogMaxOpenedFiles(c.openedLogFiles).
 		WithCompressionFormat(c.compressionFormat).
 		WithCompresionLevel(c.compressionLevel).
-		WithMaxLinearProofLen(0).
 		WithMaxValueLen(1 << 26) // 64Mb
 
 	dataStore, err := store.Open(c.dataDir, opts)
@@ -149,18 +149,18 @@ func main() {
 	}
 	log.Printf("SQL engine successfully initialized!\r\n")
 
-	_, _, err = engine.Exec("CREATE DATABASE defaultdb;", map[string]interface{}{}, nil)
+	_, _, err = engine.Exec(context.Background(), nil, "CREATE DATABASE defaultdb;", map[string]interface{}{})
 	if err != nil {
 		panic(err)
 	}
 
-	_, _, err = engine.Exec("USE DATABASE defaultdb;", map[string]interface{}{}, nil)
+	_, _, err = engine.Exec(context.Background(), nil, "USE DATABASE defaultdb;", map[string]interface{}{})
 	if err != nil {
 		panic(err)
 	}
 
 	log.Printf("Creating tables\r\n")
-	_, _, err = engine.Exec("CREATE TABLE IF NOT EXISTS entries (id INTEGER, value BLOB, ts INTEGER, PRIMARY KEY id);", map[string]interface{}{}, nil)
+	_, _, err = engine.Exec(context.Background(), nil, "CREATE TABLE IF NOT EXISTS entries (id INTEGER, value BLOB, ts INTEGER, PRIMARY KEY id);", map[string]interface{}{})
 	if err != nil {
 		panic(err)
 	}
@@ -200,8 +200,9 @@ func main() {
 			log.Printf("Committer %d is inserting data...\r\n", id)
 			for i := 0; i < c.kvCount; i++ {
 				entry := <-entries
-				_, _, err = engine.Exec("INSERT INTO entries (id, value, ts) VALUES (@id, @value, now());",
-					map[string]interface{}{"id": entry.id, "value": entry.value}, nil)
+				_, _, err = engine.Exec(context.Background(), nil,
+					"INSERT INTO entries (id, value, ts) VALUES (@id, @value, now());",
+					map[string]interface{}{"id": entry.id, "value": entry.value})
 				if err != nil {
 					panic(err)
 				}
@@ -218,18 +219,18 @@ func main() {
 			}
 			log.Printf("Reader %d is reading data\n", id)
 			for i := 1; i <= c.rdCount; i++ {
-				r, err := engine.Query("SELECT count() FROM entries where id<=@i;", map[string]interface{}{"i": i}, nil)
+				r, err := engine.Query(context.Background(), nil, "SELECT count() FROM entries where id<=@i;", map[string]interface{}{"i": i})
 				if err != nil {
 					log.Printf("Error querying val %d: %s", i, err.Error())
 					panic(err)
 				}
-				ret, err := r.Read()
+				ret, err := r.Read(context.Background())
 				if err != nil {
 					log.Printf("Error reading val %d: %s", i, err.Error())
 					panic(err)
 				}
 				r.Close()
-				n := ret.ValuesBySelector["(defaultdb.entries.col0)"].Value().(uint64)
+				n := ret.ValuesBySelector["(defaultdb.entries.col0)"].RawValue().(uint64)
 				if n != uint64(i) {
 					log.Printf("Reader %d read %d vs %d", id, n, i)
 				}
@@ -244,16 +245,16 @@ func main() {
 	wg.Wait()
 	log.Printf("All committers done...\r\n")
 
-	r, err := engine.Query("SELECT count() FROM  entries;", map[string]interface{}{}, nil)
+	r, err := engine.Query(context.Background(), nil, "SELECT count() FROM  entries;", map[string]interface{}{})
 	if err != nil {
 		panic(err)
 	}
-	row, err := r.Read()
+	row, err := r.Read(context.Background())
 	if err != nil {
 		panic(err)
 	}
 
-	count := row.ValuesBySelector["(defaultdb.entries.col0)"].Value().(uint64)
+	count := row.ValuesBySelector["(defaultdb.entries.col0)"].RawValue().(uint64)
 	log.Printf("- Counted %d entries\n", count)
 	defer func() {
 		err := r.Close()

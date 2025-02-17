@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,9 +25,9 @@ import (
 
 	"github.com/codenotary/immudb/cmd/cmdtest"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/database"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,7 +50,7 @@ func (dbm dbMock) GetOptions() *database.Options {
 	if dbm.getOptionsF != nil {
 		return dbm.getOptionsF()
 	}
-	return database.DefaultOption()
+	return database.DefaultOptions()
 }
 
 func (dbm dbMock) GetName() string {
@@ -61,7 +61,6 @@ func (dbm dbMock) GetName() string {
 }
 
 func TestMetricFuncComputeDBEntries(t *testing.T) {
-
 	currentStateSuccessfulOnce := func(callCounter *int) (*schema.ImmutableState, error) {
 		*callCounter++
 		if *callCounter == 1 {
@@ -73,12 +72,15 @@ func TestMetricFuncComputeDBEntries(t *testing.T) {
 	}
 
 	currentStateCounter := 0
-	dbList := database.NewDatabaseList()
-	dbList.Put(dbMock{
-		currentStateF: func() (*schema.ImmutableState, error) {
-			return currentStateSuccessfulOnce(&currentStateCounter)
-		},
-	})
+	dbList := database.NewDatabaseList(database.NewDBManager(func(name string, opts *database.Options) (database.DB, error) {
+		return &dbMock{
+			currentStateF: func() (*schema.ImmutableState, error) {
+				return currentStateSuccessfulOnce(&currentStateCounter)
+			},
+		}, nil
+	}, 100, logger.NewMemoryLogger()))
+
+	dbList.Put("test", database.DefaultOptions())
 
 	currentStateCountersysDB := 0
 	sysDB := dbMock{
@@ -86,7 +88,7 @@ func TestMetricFuncComputeDBEntries(t *testing.T) {
 			return "systemdb"
 		},
 		getOptionsF: func() *database.Options {
-			return database.DefaultOption()
+			return database.DefaultOptions()
 		},
 		currentStateF: func() (*schema.ImmutableState, error) {
 			return currentStateSuccessfulOnce(&currentStateCountersysDB)
@@ -135,15 +137,17 @@ func TestMetricFuncComputeDBSizes(t *testing.T) {
 	defer file.Close()
 	//<--
 
-	dbList := database.NewDatabaseList()
-	dbList.Put(dbMock{
-		getNameF: func() string {
-			return "defaultdb"
-		},
-		getOptionsF: func() *database.Options {
-			return database.DefaultOption()
-		},
-	})
+	dbList := database.NewDatabaseList(database.NewDBManager(func(name string, opts *database.Options) (database.DB, error) {
+		return &dbMock{
+			getNameF: func() string {
+				return "defaultdb"
+			},
+			getOptionsF: func() *database.Options {
+				return database.DefaultOptions()
+			},
+		}, nil
+	}, 100, logger.NewMemoryLogger()))
+	dbList.Put("test", database.DefaultOptions())
 
 	s := ImmuServer{
 		Options: &Options{
@@ -153,7 +157,7 @@ func TestMetricFuncComputeDBSizes(t *testing.T) {
 		dbList: dbList,
 		sysDB: dbMock{
 			getOptionsF: func() *database.Options {
-				return database.DefaultOption()
+				return database.DefaultOptions()
 			},
 		},
 	}
@@ -174,4 +178,39 @@ func TestMetricFuncComputeDBSizes(t *testing.T) {
 	s.dbList = nil
 	s.sysDB = nil
 	s.metricFuncComputeDBSizes()
+}
+
+func TestMetricFuncComputeLoadedDBSize(t *testing.T) {
+	dbList := database.NewDatabaseList(database.NewDBManager(func(name string, opts *database.Options) (database.DB, error) {
+		db := dbMock{
+			getNameF: func() string {
+				return name
+			},
+			getOptionsF: func() *database.Options {
+				return opts
+			},
+		}
+		return db, nil
+	}, 10, logger.NewMemoryLogger()))
+
+	dbList.Put("defaultdb", database.DefaultOptions())
+
+	var sw strings.Builder
+	s := ImmuServer{
+		Options: &Options{
+			defaultDBName: "defaultdb",
+		},
+		dbList: dbList,
+		sysDB: dbMock{
+			getOptionsF: func() *database.Options {
+				return database.DefaultOptions()
+			},
+		},
+		Logger: logger.NewSimpleLoggerWithLevel(
+			"TestMetricFuncComputeDBSizes",
+			&sw,
+			logger.LogError),
+	}
+	require.Equal(t, s.metricFuncComputeLoadedDBSize(), 1.0)
+	require.Equal(t, s.metricFuncComputeSessionCount(), 0.0)
 }

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,16 +21,16 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/client"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/codenotary/immudb/pkg/server"
-	"github.com/codenotary/immudb/pkg/server/servertest"
 	"github.com/codenotary/immudb/test/performance-test-suite/pkg/benchmarks"
 )
 
@@ -47,6 +47,7 @@ type Config struct {
 	KeySize    int
 	ValueSize  int
 	AsyncWrite bool
+	Replica    string
 }
 
 type benchmark struct {
@@ -64,8 +65,10 @@ type benchmark struct {
 
 	m sync.Mutex
 
-	server  *servertest.BufconnServer
-	clients []client.ImmuClient
+	primaryServer *server.ImmuServer
+	replicaServer *server.ImmuServer
+	clients       []client.ImmuClient
+	tempDirs      []string
 }
 
 type Result struct {
@@ -108,35 +111,115 @@ func (b *benchmark) Name() string {
 	return b.cfg.Name
 }
 
-func (b *benchmark) Warmup() error {
-	const dirName = "tx-test"
-
-	err := os.RemoveAll(dirName)
+func (b *benchmark) Warmup(tempDirBase string) error {
+	primaryPath, err := os.MkdirTemp(tempDirBase, "tx-test-primary")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dirName)
+	b.tempDirs=append(b.tempDirs,primaryPath)
 
-	options := server.
+	primaryServerOpts := server.
 		DefaultOptions().
-		WithDir(dirName).
-		WithLogFormat(logger.LogFormatJSON)
+		WithDir(primaryPath).
+		WithMetricsServer(false).
+		WithWebServer(false).
+		WithPgsqlServer(false).
+		WithPort(0).
+		WithLogFormat(logger.LogFormatJSON).
+		WithLogfile("./immudb.log")
 
-	b.server = servertest.NewBufconnServer(options)
-	b.server.Server.Srv.WithLogger(logger.NewMemoryLoggerWithLevel(logger.LogDebug))
+	primaryServerReplicaOptions := server.ReplicationOptions{}
 
-	err = b.server.Start()
+	if b.cfg.Replica == "async" {
+		primaryServerOpts.WithReplicationOptions(primaryServerReplicaOptions.WithIsReplica(false))
+	}
+
+	if b.cfg.Replica == "sync" {
+		primaryServerOpts.WithReplicationOptions(primaryServerReplicaOptions.WithIsReplica(false).WithSyncReplication(true).WithSyncAcks(1))
+	}
+
+	b.primaryServer = server.DefaultServer().WithOptions(primaryServerOpts).(*server.ImmuServer)
+
+	err = b.primaryServer.Initialize()
 	if err != nil {
 		return err
+	}
+
+	go func() {
+		b.primaryServer.Start()
+	}()
+
+	time.Sleep(1 * time.Second)
+
+	primaryPort := b.primaryServer.Listener.Addr().(*net.TCPAddr).Port
+
+	if b.cfg.Replica == "async" || b.cfg.Replica == "sync" {
+		replicaPath, err := os.MkdirTemp(tempDirBase, fmt.Sprintf("%s-tx-test-replica", b.cfg.Replica))
+		if err != nil {
+			return err
+		}
+
+		b.tempDirs=append(b.tempDirs,replicaPath)
+
+		replicaServerOptions := server.
+			DefaultOptions().
+			WithDir(replicaPath).
+			WithPort(0).
+			WithLogFormat(logger.LogFormatJSON).
+			WithLogfile("./replica.log")
+
+		replicaServerOptions.PgsqlServer = false
+		replicaServerOptions.MetricsServer = false
+		replicaServerOptions.WebServer = false
+
+		replicaServerReplicaOptions := server.ReplicationOptions{}
+
+		replicaServerReplicaOptions.PrimaryHost = "127.0.0.1"
+		replicaServerReplicaOptions.PrimaryPort = primaryPort
+		replicaServerReplicaOptions.PrimaryUsername = "immudb"
+		replicaServerReplicaOptions.PrimaryPassword = "immudb"
+		replicaServerReplicaOptions.PrefetchTxBufferSize = 1000
+		replicaServerReplicaOptions.ReplicationCommitConcurrency = 30
+
+		if b.cfg.Replica == "async" {
+			replicaServerOptions.WithReplicationOptions(replicaServerReplicaOptions.WithIsReplica(true))
+		}
+
+		if b.cfg.Replica == "sync" {
+			replicaServerReplicaOptions = *replicaServerReplicaOptions.WithIsReplica(true).WithSyncReplication(true)
+
+			replicaServerOptions.WithReplicationOptions(&replicaServerReplicaOptions)
+		}
+
+		b.replicaServer = server.DefaultServer().WithOptions(replicaServerOptions).(*server.ImmuServer)
+
+		err = b.replicaServer.Initialize()
+		if err != nil {
+			return err
+		}
+
+		go func() {
+			b.replicaServer.Start()
+		}()
+
+		time.Sleep(1 * time.Second)
 	}
 
 	b.clients = []client.ImmuClient{}
 	for i := 0; i < b.cfg.Workers; i++ {
-		c, err := b.server.NewAuthenticatedClient(client.DefaultOptions())
+		path, err := os.MkdirTemp(tempDirBase, "immudb_client")
 		if err != nil {
 			return err
 		}
+		c := client.NewClient().WithOptions(client.DefaultOptions().WithPort(primaryPort).WithDir(path))
+
+		err = c.OpenSession(context.Background(), []byte(`immudb`), []byte(`immudb`), "defaultdb")
+		if err != nil {
+			return err
+		}
+
 		b.clients = append(b.clients, c)
+		b.tempDirs = append(b.tempDirs, path)
 	}
 
 	return nil
@@ -151,7 +234,17 @@ func (b *benchmark) Cleanup() error {
 		}
 	}
 
-	return b.server.Stop()
+	b.primaryServer.Stop()
+	b.primaryServer = nil
+
+	if b.replicaServer != nil {
+		b.replicaServer.Stop()
+		b.replicaServer = nil
+	}
+	for _,tDir := range(b.tempDirs) {
+		os.RemoveAll(tDir)
+	}
+	return nil
 }
 
 func (b *benchmark) Run(duration time.Duration, seed uint64) (interface{}, error) {

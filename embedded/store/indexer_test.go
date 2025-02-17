@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,22 +17,29 @@ limitations under the License.
 package store
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/codenotary/immudb/embedded/tbtree"
 	"github.com/codenotary/immudb/embedded/watchers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestNewIndexerFailure(t *testing.T) {
-	indexer, err := newIndexer(t.TempDir(), nil, nil, 0)
+	indexer, err := newIndexer(t.TempDir(), nil, nil)
 	require.Nil(t, indexer)
-	require.ErrorIs(t, err, tbtree.ErrIllegalArguments)
+	require.ErrorIs(t, err, ErrIllegalArguments)
+}
+
+func TestNewIndexer(t *testing.T) {
+	stor := ImmuStore{}
+	indexer, err := newIndexer(t.TempDir(), &stor, DefaultOptions())
+	require.Nil(t, err)
+	require.NotNil(t, indexer)
 }
 
 func TestClosedIndexerFailures(t *testing.T) {
@@ -41,10 +48,11 @@ func TestClosedIndexerFailures(t *testing.T) {
 	))
 	require.NoError(t, err)
 
-	err = store.indexer.Close()
+	indexer, err := store.getIndexerFor(nil)
 	require.NoError(t, err)
 
-	indexer := store.indexer
+	err = indexer.Close()
+	require.NoError(t, err)
 
 	v, tx, hc, err := indexer.Get(nil)
 	require.Zero(t, v)
@@ -61,12 +69,11 @@ func TestClosedIndexerFailures(t *testing.T) {
 	require.Zero(t, snap)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
-	snap, err = indexer.SnapshotSince(0)
+	snap, err = indexer.SnapshotMustIncludeTxIDWithRenewalPeriod(context.Background(), 0, 0)
 	require.Zero(t, snap)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
-	exists, err := indexer.ExistKeyWith(nil, nil)
-	require.Zero(t, exists)
+	_, _, _, _, err = indexer.GetWithPrefix(nil, nil)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = indexer.Sync()
@@ -87,7 +94,7 @@ func TestMaxIndexWaitees(t *testing.T) {
 	errCh := make(chan error)
 	for i := 0; i < 2; i++ {
 		go func() {
-			errCh <- store.WaitForIndexingUpto(1, make(<-chan struct{}))
+			errCh <- store.WaitForIndexingUpto(context.Background(), 1)
 		}()
 	}
 
@@ -100,13 +107,13 @@ func TestMaxIndexWaitees(t *testing.T) {
 	}
 
 	// Store one transaction
-	tx, err := store.NewWriteOnlyTx()
+	tx, err := store.NewWriteOnlyTx(context.Background())
 	require.NoError(t, err)
 
 	err = tx.Set([]byte{1}, nil, []byte{2})
 	require.NoError(t, err)
 
-	hdr, err := tx.AsyncCommit()
+	hdr, err := tx.AsyncCommit(context.Background())
 	require.NoError(t, err)
 	require.EqualValues(t, 1, hdr.ID)
 
@@ -128,7 +135,11 @@ func TestRestartIndexCornerCases(t *testing.T) {
 			"Closed store",
 			func(t *testing.T, dir string, s *ImmuStore) {
 				s.Close()
-				err := s.indexer.restartIndex()
+
+				indexer, err := s.getIndexerFor(nil)
+				require.NoError(t, err)
+
+				err = indexer.restartIndex()
 				require.ErrorIs(t, err, ErrAlreadyClosed)
 			},
 		},
@@ -136,7 +147,11 @@ func TestRestartIndexCornerCases(t *testing.T) {
 			"No nodes folder",
 			func(t *testing.T, dir string, s *ImmuStore) {
 				require.NoError(t, os.MkdirAll(filepath.Join(dir, "index/commit1"), 0777))
-				err := s.indexer.restartIndex()
+
+				indexer, err := s.getIndexerFor(nil)
+				require.NoError(t, err)
+
+				err = indexer.restartIndex()
 				require.NoError(t, err)
 			},
 		},
@@ -144,7 +159,11 @@ func TestRestartIndexCornerCases(t *testing.T) {
 			"No commit folder",
 			func(t *testing.T, dir string, s *ImmuStore) {
 				require.NoError(t, os.MkdirAll(filepath.Join(dir, "index/nodes1"), 0777))
-				err := s.indexer.restartIndex()
+
+				indexer, err := s.getIndexerFor(nil)
+				require.NoError(t, err)
+
+				err = indexer.restartIndex()
 				require.NoError(t, err)
 			},
 		},
@@ -153,7 +172,11 @@ func TestRestartIndexCornerCases(t *testing.T) {
 			func(t *testing.T, dir string, s *ImmuStore) {
 				require.NoError(t, os.MkdirAll(filepath.Join(dir, "index/nodes1"), 0777))
 				require.NoError(t, ioutil.WriteFile(filepath.Join(dir, "index/commit1"), []byte{}, 0777))
-				err := s.indexer.restartIndex()
+
+				indexer, err := s.getIndexerFor(nil)
+				require.NoError(t, err)
+
+				err = indexer.restartIndex()
 				require.NoError(t, err)
 			},
 		},
@@ -186,12 +209,14 @@ func TestClosedIndexer(t *testing.T) {
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrAlreadyClosed)
 
-	_, err = i.SnapshotSince(0)
+	_, err = i.SnapshotMustIncludeTxIDWithRenewalPeriod(context.Background(), 0, 0)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrAlreadyClosed)
 
-	_, err = i.ExistKeyWith(dummy, dummy)
-	assert.Error(t, err)
+	_, _, _, err = i.GetBetween(dummy, 1, 2)
+	assert.ErrorIs(t, err, ErrAlreadyClosed)
+
+	_, _, _, _, err = i.GetWithPrefix(dummy, dummy)
 	assert.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = i.Sync()
@@ -201,4 +226,76 @@ func TestClosedIndexer(t *testing.T) {
 	err = i.Close()
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, ErrAlreadyClosed)
+}
+
+func TestIndexFlushShouldReleaseMemory(t *testing.T) {
+	d := t.TempDir()
+	store, err := Open(d, DefaultOptions())
+	require.NoError(t, err)
+	defer store.Close()
+
+	key := make([]byte, 100)
+	value := make([]byte, 100)
+
+	n := 100
+	for i := 0; i < n; i++ {
+		tx, err := store.NewWriteOnlyTx(context.Background())
+		require.NoError(t, err)
+
+		err = tx.Set(key, nil, value)
+		require.NoError(t, err)
+		_, err = tx.Commit(context.Background())
+		require.NoError(t, err)
+	}
+
+	idx, err := store.getIndexerFor([]byte{})
+	require.NoError(t, err)
+	require.NotNil(t, idx)
+
+	require.Greater(t, store.memSemaphore.Value(), uint64(0))
+
+	_, _, err = idx.index.Flush()
+	require.NoError(t, err)
+	require.Zero(t, store.memSemaphore.Value())
+}
+
+func TestIndexerWriteStalling(t *testing.T) {
+	d := t.TempDir()
+	store, err := Open(d, DefaultOptions().WithMultiIndexing(true).WithIndexOptions(DefaultIndexOptions().WithMaxBufferedDataSize(1024).WithMaxGlobalBufferedDataSize(1024)))
+	require.NoError(t, err)
+	defer store.Close()
+
+	nIndexes := 30
+
+	for i := 0; i < nIndexes; i++ {
+		err = store.InitIndexing(&IndexSpec{
+			TargetPrefix: []byte{byte(i)},
+			TargetEntryMapper: func(x int) func(key []byte, value []byte) ([]byte, error) {
+				return func(key, value []byte) ([]byte, error) {
+					return append([]byte{byte(x)}, key...), nil
+				}
+			}(i),
+		})
+		require.NoError(t, err)
+	}
+
+	key := make([]byte, 100)
+	value := make([]byte, 100)
+
+	n := 100
+	for i := 0; i < n; i++ {
+		tx, err := store.NewWriteOnlyTx(context.Background())
+		require.NoError(t, err)
+
+		err = tx.Set(key, nil, value)
+		require.NoError(t, err)
+		_, err = tx.Commit(context.Background())
+		require.NoError(t, err)
+	}
+
+	for i := 0; i < nIndexes; i++ {
+		idx, err := store.getIndexerFor([]byte{byte(i)})
+		require.NoError(t, err)
+		require.Equal(t, idx.Ts(), uint64(n))
+	}
 }

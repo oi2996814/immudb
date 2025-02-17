@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,8 @@ limitations under the License.
 package sql
 
 import (
+	"context"
+	"errors"
 	"fmt"
 
 	"github.com/codenotary/immudb/embedded/multierr"
@@ -30,18 +32,18 @@ type unionRowReader struct {
 	cols []ColDescriptor
 }
 
-func newUnionRowReader(rowReaders []RowReader) (*unionRowReader, error) {
+func newUnionRowReader(ctx context.Context, rowReaders []RowReader) (*unionRowReader, error) {
 	if len(rowReaders) == 0 {
 		return nil, ErrIllegalArguments
 	}
 
-	cols, err := rowReaders[0].Columns()
+	cols, err := rowReaders[0].Columns(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	for i := 1; i < len(rowReaders); i++ {
-		cs, err := rowReaders[i].Columns()
+		cs, err := rowReaders[i].Columns(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -71,23 +73,8 @@ func (ur *unionRowReader) Tx() *SQLTx {
 	return ur.rowReaders[0].Tx()
 }
 
-func (ur *unionRowReader) Database() string {
-	return ur.rowReaders[0].Database()
-}
-
 func (ur *unionRowReader) TableAlias() string {
 	return ""
-}
-
-func (ur *unionRowReader) SetParameters(params map[string]interface{}) error {
-	for _, r := range ur.rowReaders {
-		err := r.SetParameters(params)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (ur *unionRowReader) Parameters() map[string]interface{} {
@@ -102,17 +89,17 @@ func (ur *unionRowReader) ScanSpecs() *ScanSpecs {
 	return nil
 }
 
-func (ur *unionRowReader) Columns() ([]ColDescriptor, error) {
-	return ur.rowReaders[0].Columns()
+func (ur *unionRowReader) Columns(ctx context.Context) ([]ColDescriptor, error) {
+	return ur.rowReaders[0].Columns(ctx)
 }
 
-func (ur *unionRowReader) colsBySelector() (map[string]ColDescriptor, error) {
-	return ur.rowReaders[0].colsBySelector()
+func (ur *unionRowReader) colsBySelector(ctx context.Context) (map[string]ColDescriptor, error) {
+	return ur.rowReaders[0].colsBySelector(ctx)
 }
 
-func (ur *unionRowReader) InferParameters(params map[string]SQLValueType) error {
+func (ur *unionRowReader) InferParameters(ctx context.Context, params map[string]SQLValueType) error {
 	for _, r := range ur.rowReaders {
-		err := r.InferParameters(params)
+		err := r.InferParameters(ctx, params)
 		if err != nil {
 			return err
 		}
@@ -121,10 +108,10 @@ func (ur *unionRowReader) InferParameters(params map[string]SQLValueType) error 
 	return nil
 }
 
-func (ur *unionRowReader) Read() (*Row, error) {
+func (ur *unionRowReader) Read(ctx context.Context) (*Row, error) {
 	for {
-		row, err := ur.rowReaders[ur.currReader].Read()
-		if err == store.ErrNoMoreEntries && ur.currReader+1 < len(ur.rowReaders) {
+		row, err := ur.rowReaders[ur.currReader].Read(ctx)
+		if errors.Is(err, store.ErrNoMoreEntries) && ur.currReader+1 < len(ur.rowReaders) {
 			ur.currReader++
 			continue
 		}

@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,11 +34,14 @@ func TestWatchersHub(t *testing.T) {
 
 	wHub.DoneUpto(0)
 
+	err := wHub.RecedeTo(1)
+	require.ErrorIs(t, err, ErrIllegalState)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	err := wHub.WaitFor(1, ctx.Done())
-	require.ErrorIs(t, err, ErrCancellationRequested)
+	err = wHub.WaitFor(ctx, 1)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 
 	doneUpto, waiting, err := wHub.Status()
 	require.NoError(t, err)
@@ -52,7 +55,7 @@ func TestWatchersHub(t *testing.T) {
 		for i := 1; i <= waitessCount; i++ {
 			go func(i uint64) {
 				defer wg.Done()
-				err := wHub.WaitFor(i, nil)
+				err := wHub.WaitFor(context.Background(), i)
 				require.NoError(t, err)
 			}(uint64(i))
 		}
@@ -60,7 +63,7 @@ func TestWatchersHub(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	err = wHub.WaitFor(uint64(waitessCount*2+1), nil)
+	err = wHub.WaitFor(context.Background(), uint64(waitessCount*2+1))
 	require.ErrorIs(t, err, ErrMaxWaitessLimitExceeded)
 
 	done := make(chan struct{})
@@ -92,14 +95,17 @@ func TestWatchersHub(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = wHub.WaitFor(5, nil)
+	err = wHub.WaitFor(context.Background(), 5)
+	require.NoError(t, err)
+
+	err = wHub.RecedeTo(5)
 	require.NoError(t, err)
 
 	wg.Add(1)
 
 	go func() {
 		defer wg.Done()
-		err := wHub.WaitFor(uint64(waitessCount)+1, nil)
+		err := wHub.WaitFor(context.Background(), uint64(waitessCount)+1)
 		if !errors.Is(err, ErrAlreadyClosed) {
 			require.NoError(t, err)
 		}
@@ -116,10 +122,13 @@ func TestWatchersHub(t *testing.T) {
 		t.FailNow()
 	}
 
-	err = wHub.WaitFor(0, nil)
+	err = wHub.WaitFor(context.Background(), 0)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	err = wHub.DoneUpto(0)
+	require.ErrorIs(t, err, ErrAlreadyClosed)
+
+	err = wHub.RecedeTo(0)
 	require.ErrorIs(t, err, ErrAlreadyClosed)
 
 	_, _, err = wHub.Status()
@@ -149,8 +158,8 @@ func TestSimultaneousCancellationAndNotification(t *testing.T) {
 					doneUpTo, _, err := wHub.Status()
 					require.NoError(t, err)
 
-					err = wHub.WaitFor(j, ctx.Done())
-					if errors.Is(err, ErrCancellationRequested) {
+					err = wHub.WaitFor(ctx, j)
+					if errors.Is(err, context.DeadlineExceeded) {
 						// Check internal invariant of the wHub
 						// Since we got cancel request it must only happen
 						// as long as we did not already cross the waiting point

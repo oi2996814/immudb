@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package store
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"testing"
@@ -37,7 +38,7 @@ func TestTxReader(t *testing.T) {
 	eCount := 10
 
 	for i := 0; i < txCount; i++ {
-		tx, err := immuStore.NewWriteOnlyTx()
+		tx, err := immuStore.NewWriteOnlyTx(context.Background())
 		require.NoError(t, err)
 
 		for j := 0; j < eCount; j++ {
@@ -51,7 +52,7 @@ func TestTxReader(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		txhdr, err := tx.AsyncCommit()
+		txhdr, err := tx.AsyncCommit(context.Background())
 		require.NoError(t, err)
 		require.Equal(t, uint64(i+1), txhdr.ID)
 	}

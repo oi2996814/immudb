@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,7 +40,7 @@ func TestGetCommandsErrors(t *testing.T) {
 
 	// GetByIndex
 	_, err := ic.GetByIndex([]string{"X"})
-	require.Equal(t, errors.New(` "X" is not a valid index number`), err)
+	require.ErrorIs(t, err, errors.New(` "X" is not a valid index number`))
 
 	immuClientMock.ByIndexF = func(ctx context.Context, index uint64) (*schema.StructuredItem, error) {
 		return nil, errors.New("NotFound")
@@ -61,7 +61,7 @@ func TestGetCommandsErrors(t *testing.T) {
 		return nil, errByIndex
 	}
 	_, err = ic.GetByIndex([]string{"0"})
-	require.Equal(t, errByIndex, err)
+	require.ErrorIs(t, err, errByIndex)
 
 	// GetKey
 	immuClientMock.GetF = func(ctx context.Context, key []byte) (*schema.StructuredItem, error) {
@@ -83,7 +83,7 @@ func TestGetCommandsErrors(t *testing.T) {
 		return nil, errGet
 	}
 	_, err = ic.GetKey([]string{"key1"})
-	require.Equal(t, errGet, err)
+	require.ErrorIs(t, err, errGet)
 
 	// RawSafeGetKey
 	immuClientMock.RawSafeGetF = func(context.Context, []byte, ...grpc.CallOption) (vi *client.VerifiedItem, err error) {
@@ -105,7 +105,7 @@ func TestGetCommandsErrors(t *testing.T) {
 		return nil, errRawSafeGet
 	}
 	_, err = ic.RawSafeGetKey([]string{"key1"})
-	require.Equal(t, errRawSafeGet, err)
+	require.ErrorIs(t, err, errRawSafeGet)
 
 	// SafeGetKey
 	immuClientMock.SafeGetF = func(context.Context, []byte, ...grpc.CallOption) (vi *client.VerifiedItem, err error) {
@@ -127,7 +127,7 @@ func TestGetCommandsErrors(t *testing.T) {
 		return nil, errSafeGet
 	}
 	_, err = ic.SafeGetKey([]string{"key1"})
-	require.Equal(t, errSafeGet, err)
+	require.ErrorIs(t, err, errSafeGet)
 
 	// GetRawBySafeIndex
 	_, err = ic.GetRawBySafeIndex([]string{"X"})
@@ -138,6 +138,6 @@ func TestGetCommandsErrors(t *testing.T) {
 		return nil, errRawBySafeIndex
 	}
 	_, err = ic.GetRawBySafeIndex([]string{"0"})
-	require.Equal(t, errRawBySafeIndex, err)
+	require.ErrorIs(t, err, errRawBySafeIndex)
 }
 */

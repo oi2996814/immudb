@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -51,7 +52,19 @@ func testServer(t *testing.T) (port int, cleanup func()) {
 	return port, func() { server.Stop() }
 }
 
+func setTempCwd(t *testing.T) {
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	err = os.Chdir(t.TempDir())
+	require.NoError(t, err)
+
+	t.Cleanup(func() { os.Chdir(origDir) })
+}
+
 func TestDriver_Open(t *testing.T) {
+	setTempCwd(t)
+
 	d := immuDriver
 	conn, err := d.Open("immudb://immudb:immudb@127.0.0.1:5555/defaultdb")
 	require.Error(t, err)
@@ -97,20 +110,22 @@ func TestParseConfig_Require(t *testing.T) {
 func TestParseConfigErrs(t *testing.T) {
 	connString := "immudb://immudb:immudb@127.0.0.1:aaa/defaultdb"
 	_, err := ParseConfig(connString)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBadQueryString)
 
 	connString = "AAAA://immudb:immudb@127.0.0.1:123/defaultdb"
 	_, err = ParseConfig(connString)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBadQueryString)
 
 	connString = "AAAA://immudb:immudb@127.0.0.1:123/defaultdb?sslmode=invalid"
 	_, err = ParseConfig(connString)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrBadQueryString)
 }
 
 func TestDriver_OpenSSLPrefer(t *testing.T) {
 	port, cleanup := testServer(t)
 	defer cleanup()
+
+	setTempCwd(t)
 
 	d := immuDriver
 	conn, err := d.Open(fmt.Sprintf("immudb://immudb:immudb@127.0.0.1:%d/defaultdb", port))
@@ -121,6 +136,8 @@ func TestDriver_OpenSSLPrefer(t *testing.T) {
 func TestDriver_OpenSSLDisable(t *testing.T) {
 	port, cleanup := testServer(t)
 	defer cleanup()
+
+	setTempCwd(t)
 
 	d := immuDriver
 	conn, err := d.Open(fmt.Sprintf("immudb://immudb:immudb@127.0.0.1:%d/defaultdb?sslmode=disable", port))
@@ -134,6 +151,8 @@ func TestDriver_OpenSSLRequire(t *testing.T) {
 	port, cleanup := testServer(t)
 	defer cleanup()
 
+	setTempCwd(t)
+
 	d := immuDriver
 	conn, err := d.Open(fmt.Sprintf("immudb://immudb:immudb@127.0.0.1:%d/defaultdb?sslmode=require", port))
 	require.NoError(t, err)
@@ -144,10 +163,12 @@ func Test_SQLOpen(t *testing.T) {
 	port, cleanup := testServer(t)
 	defer cleanup()
 
+	setTempCwd(t)
+
 	db, err := sql.Open("immudb", fmt.Sprintf("immudb://immudb:immudb@127.0.0.1:%d/defaultdb?sslmode=disable", port))
 	require.NoError(t, err)
 
-	_, err = db.ExecContext(context.TODO(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", "myTable"))
+	_, err = db.ExecContext(context.Background(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", "myTable"))
 	require.NoError(t, err)
 }
 
@@ -155,9 +176,11 @@ func Test_Open(t *testing.T) {
 	port, cleanup := testServer(t)
 	defer cleanup()
 
+	setTempCwd(t)
+
 	db := Open(fmt.Sprintf("immudb://immudb:immudb@127.0.0.1:%d/defaultdb?sslmode=disable", port))
 	require.NotNil(t, db)
 
-	_, err := db.ExecContext(context.TODO(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", "myTable"))
+	_, err := db.ExecContext(context.Background(), fmt.Sprintf("CREATE TABLE %s (id INTEGER, amount INTEGER, total INTEGER, title VARCHAR, content BLOB, isPresent BOOLEAN, PRIMARY KEY id)", "myTable"))
 	require.NoError(t, err)
 }

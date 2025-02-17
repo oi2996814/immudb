@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,11 +20,10 @@ import (
 	"crypto/tls"
 	"testing"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/auth"
-	"github.com/codenotary/immudb/pkg/logger"
 	"github.com/codenotary/immudb/pkg/stream"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +37,7 @@ func TestOptions(t *testing.T) {
 		op.DevMode != false ||
 		op.NoHistograms != false ||
 		op.AdminPassword != auth.SysAdminPassword ||
+		op.ForceAdminPassword != false ||
 		op.Address != "0.0.0.0" ||
 		op.Network != "tcp" ||
 		op.Port != 3322 ||
@@ -66,26 +66,30 @@ func TestReplicationOptions(t *testing.T) {
 		WithIsReplica(true).
 		WithSyncReplication(false).
 		WithSyncAcks(0).
-		WithMasterAddress("localhost").
-		WithMasterPort(3322).
-		WithFollowerUsername("follower-user").
-		WithFollowerPassword("follower-pwd").
+		WithPrimaryHost("localhost").
+		WithPrimaryPort(3322).
+		WithPrimaryUsername("primary-user").
+		WithPrimaryPassword("primary-pwd").
 		WithPrefetchTxBufferSize(100).
 		WithReplicationCommitConcurrency(5).
-		WithAllowTxDiscarding(true)
+		WithAllowTxDiscarding(true).
+		WithSkipIntegrityCheck(true).
+		WithWaitForIndexing(true)
 
 	require.True(t, repOpts.IsReplica)
 	require.False(t, repOpts.SyncReplication)
 	require.Zero(t, repOpts.SyncAcks)
-	require.Equal(t, "localhost", repOpts.MasterAddress)
-	require.Equal(t, 3322, repOpts.MasterPort)
-	require.Equal(t, "follower-user", repOpts.FollowerUsername)
-	require.Equal(t, "follower-pwd", repOpts.FollowerPassword)
+	require.Equal(t, "localhost", repOpts.PrimaryHost)
+	require.Equal(t, 3322, repOpts.PrimaryPort)
+	require.Equal(t, "primary-user", repOpts.PrimaryUsername)
+	require.Equal(t, "primary-pwd", repOpts.PrimaryPassword)
 	require.Equal(t, 100, repOpts.PrefetchTxBufferSize)
 	require.Equal(t, 5, repOpts.ReplicationCommitConcurrency)
 	require.True(t, repOpts.AllowTxDiscarding)
+	require.True(t, repOpts.SkipIntegrityCheck)
+	require.True(t, repOpts.WaitForIndexing)
 
-	// master-related settings
+	// primary-related settings
 	repOpts.
 		WithIsReplica(false).
 		WithSyncReplication(true).
@@ -100,11 +104,17 @@ func TestSetOptions(t *testing.T) {
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{}}
 
 	op := DefaultOptions().WithDir("immudb_dir").WithNetwork("udp").
-		WithAddress("localhost").WithPort(2048).
-		WithPidfile("immu.pid").WithAuth(false).
+		WithAddress("localhost").
+		WithPort(2048).
+		WithPidfile("immu.pid").
+		WithAuth(false).
 		WithMaxRecvMsgSize(4096).
-		WithDetached(true).WithNoHistograms(true).WithMetricsServer(false).
-		WithDevMode(true).WithLogfile("logfile").WithAdminPassword("admin").
+		WithDetached(true).
+		WithNoHistograms(true).
+		WithMetricsServer(false).
+		WithDevMode(true).WithLogfile("logfile").
+		WithAdminPassword("admin").
+		WithForceAdminPassword(true).
 		WithStreamChunkSize(4096).
 		WithWebServerPort(8081).
 		WithTokenExpiryTime(52).
@@ -130,6 +140,7 @@ func TestSetOptions(t *testing.T) {
 		op.DevMode != true ||
 		op.Logfile != "logfile" ||
 		op.AdminPassword != "admin" ||
+		op.ForceAdminPassword != true ||
 		op.StreamChunkSize != 4096 ||
 		op.WebServerPort != 8081 ||
 		op.Bind() != "localhost:2048" ||
@@ -170,7 +181,7 @@ Superadmin default credentials
 		WithPidfile("immu.pid").
 		WithLogfile("immu.log")
 
-	assert.Equal(t, expected, op.String())
+	require.Equal(t, expected, op.String())
 }
 
 func TestOptionsWithSyncReplicationString(t *testing.T) {
@@ -203,7 +214,7 @@ Superadmin default credentials
 		WithSyncReplication(true).
 		WithSyncAcks(1)
 
-	assert.Equal(t, expected, op.String())
+	require.Equal(t, expected, op.String())
 }
 
 func TestOptionsStringWithS3(t *testing.T) {
@@ -226,6 +237,8 @@ S3 storage
    bucket name   : s3-bucket-name
    location      : s3-location
    prefix        : s3-path-prefix
+   external id   : false
+   metadata url  : http://169.254.169.254
 ----------------------------------------
 Superadmin default credentials
    Username      : immudb
@@ -241,10 +254,103 @@ Superadmin default credentials
 				WithS3Endpoint("s3-endpoint").
 				WithS3BucketName("s3-bucket-name").
 				WithS3Location("s3-location").
-				WithS3PathPrefix("s3-path-prefix"),
+				WithS3PathPrefix("s3-path-prefix").
+				WithS3InstanceMetadataURL("http://169.254.169.254"),
 		)
 
-	assert.Equal(t, expected, op.String())
+	require.Equal(t, expected, op.String())
+}
+
+func TestOptionsStringWithS3RoleBased(t *testing.T) {
+	expected := `================ Config ================
+Data dir         : ./data
+Address          : 0.0.0.0:3322
+Metrics address  : 0.0.0.0:9497/metrics
+Sync replication : false
+Config file      : configs/immudb.toml
+PID file         : immu.pid
+Log file         : immu.log
+Max recv msg size: 33554432
+Auth enabled     : true
+Dev mode         : false
+Default database : defaultdb
+Maintenance mode : false
+Synced mode      : true
+S3 storage
+   role auth     : true
+   role name     : s3-role
+   endpoint      : s3-endpoint
+   bucket name   : s3-bucket-name
+   location      : s3-location
+   prefix        : s3-path-prefix
+   external id   : false
+   metadata url  : http://169.254.169.254
+----------------------------------------
+Superadmin default credentials
+   Username      : immudb
+   Password      : immudb
+========================================`
+
+	op := DefaultOptions().
+		WithPidfile("immu.pid").
+		WithLogfile("immu.log").
+		WithRemoteStorageOptions(
+			DefaultRemoteStorageOptions().
+				WithS3Storage(true).
+				WithS3RoleEnabled(true).
+				WithS3Role("s3-role").
+				WithS3Endpoint("s3-endpoint").
+				WithS3BucketName("s3-bucket-name").
+				WithS3Location("s3-location").
+				WithS3PathPrefix("s3-path-prefix").
+				WithS3InstanceMetadataURL("http://169.254.169.254"),
+		)
+
+	require.Equal(t, expected, op.String())
+}
+
+func TestOptionsStringWithS3ExternalIdentifier(t *testing.T) {
+	expected := `================ Config ================
+Data dir         : ./data
+Address          : 0.0.0.0:3322
+Metrics address  : 0.0.0.0:9497/metrics
+Sync replication : false
+Config file      : configs/immudb.toml
+PID file         : immu.pid
+Log file         : immu.log
+Max recv msg size: 33554432
+Auth enabled     : true
+Dev mode         : false
+Default database : defaultdb
+Maintenance mode : false
+Synced mode      : true
+S3 storage
+   endpoint      : s3-endpoint
+   bucket name   : s3-bucket-name
+   location      : s3-location
+   prefix        : s3-path-prefix
+   external id   : true
+   metadata url  : 
+----------------------------------------
+Superadmin default credentials
+   Username      : immudb
+   Password      : immudb
+========================================`
+
+	op := DefaultOptions().
+		WithPidfile("immu.pid").
+		WithLogfile("immu.log").
+		WithRemoteStorageOptions(
+			DefaultRemoteStorageOptions().
+				WithS3Storage(true).
+				WithS3Endpoint("s3-endpoint").
+				WithS3BucketName("s3-bucket-name").
+				WithS3Location("s3-location").
+				WithS3PathPrefix("s3-path-prefix").
+				WithS3ExternalIdentifier(true),
+		)
+
+	require.Equal(t, expected, op.String())
 }
 
 func TestOptionsStringWithPProf(t *testing.T) {
@@ -274,5 +380,5 @@ Superadmin default credentials
 		WithLogfile("immu.log").
 		WithPProf(true)
 
-	assert.Equal(t, expected, op.String())
+	require.Equal(t, expected, op.String())
 }

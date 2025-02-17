@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,9 +20,9 @@ import (
 	"context"
 	"sync"
 
+	"github.com/codenotary/immudb/embedded/logger"
 	"github.com/codenotary/immudb/pkg/api/schema"
 	"github.com/codenotary/immudb/pkg/client/cache"
-	"github.com/codenotary/immudb/pkg/logger"
 )
 
 // StateService the root service interface
@@ -31,6 +31,8 @@ type StateService interface {
 	SetState(db string, state *schema.ImmutableState) error
 	CacheLock() error
 	CacheUnlock() error
+
+	SetServerIdentity(identity string)
 }
 
 type stateService struct {
@@ -39,14 +41,18 @@ type stateService struct {
 	cache         cache.Cache
 	serverUUID    string
 	logger        logger.Logger
-	sync.RWMutex
+	m             sync.Mutex
+
+	serverIdentityNotChecked bool
+	serverIdentity           string
 }
 
 // NewStateService ...
 func NewStateService(cache cache.Cache,
 	logger logger.Logger,
 	stateProvider StateProvider,
-	uuidProvider UUIDProvider) (StateService, error) {
+	uuidProvider UUIDProvider,
+) (StateService, error) {
 
 	serverUUID, err := uuidProvider.CurrentUUID(context.Background())
 	if err != nil {
@@ -69,7 +75,8 @@ func NewStateService(cache cache.Cache,
 func NewStateServiceWithUUID(cache cache.Cache,
 	logger logger.Logger,
 	stateProvider StateProvider,
-	serverUUID string) (StateService, error) {
+	serverUUID string,
+) (StateService, error) {
 
 	if serverUUID == "" {
 		return nil, ErrNoServerUuid
@@ -84,8 +91,16 @@ func NewStateServiceWithUUID(cache cache.Cache,
 }
 
 func (r *stateService) GetState(ctx context.Context, db string) (*schema.ImmutableState, error) {
-	r.Lock()
-	defer r.Unlock()
+	r.m.Lock()
+	defer r.m.Unlock()
+
+	if r.serverIdentityNotChecked {
+		err := r.cache.ServerIdentityCheck(r.serverIdentity, r.serverUUID)
+		if err != nil {
+			return nil, err
+		}
+		r.serverIdentityNotChecked = false
+	}
 
 	state, err := r.cache.Get(r.serverUUID, db)
 	if err == nil {
@@ -108,8 +123,8 @@ func (r *stateService) GetState(ctx context.Context, db string) (*schema.Immutab
 }
 
 func (r *stateService) SetState(db string, state *schema.ImmutableState) error {
-	r.Lock()
-	defer r.Unlock()
+	r.m.Lock()
+	defer r.m.Unlock()
 
 	return r.cache.Set(r.serverUUID, db, state)
 }
@@ -120,4 +135,12 @@ func (r *stateService) CacheLock() error {
 
 func (r *stateService) CacheUnlock() error {
 	return r.cache.Unlock()
+}
+
+func (r *stateService) SetServerIdentity(identity string) {
+	r.m.Lock()
+	defer r.m.Unlock()
+
+	r.serverIdentityNotChecked = true
+	r.serverIdentity = identity
 }

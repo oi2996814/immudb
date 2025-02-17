@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -107,7 +109,6 @@ func main() {
 		WithCommitLogMaxOpenedFiles(*openedLogFiles).
 		WithCompressionFormat(compressionFormat).
 		WithCompresionLevel(compressionLevel).
-		WithMaxLinearProofLen(0).
 		WithMaxValueLen(1 << 26) // 64Mb
 
 	immuStore, err := store.Open(*dataDir, opts)
@@ -119,7 +120,7 @@ func main() {
 
 	defer st.Close()
 
-	tx, err := st.NewWriteOnlyTx()
+	tx, err := st.NewWriteOnlyTx(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -129,7 +130,7 @@ func main() {
 		panic(err)
 	}
 
-	hdr, err := tx.Commit()
+	hdr, err := tx.Commit(context.Background())
 	if err != nil {
 		panic(err)
 	}
@@ -155,16 +156,13 @@ func main() {
 		if *action == "get" {
 			time.Sleep(time.Duration(*waitForIndexing) * time.Millisecond)
 
-			ts := immuStore.IndexInfo()
-			fmt.Printf("Index up to %d\r\n", ts)
-
-			snap, err := immuStore.Snapshot()
+			snap, err := immuStore.Snapshot(nil)
 			if err != nil {
 				panic(err)
 			}
 			defer snap.Close()
 
-			valRef, err := snap.Get([]byte(*key))
+			valRef, err := snap.Get(context.Background(), []byte(*key))
 			if err != nil {
 				panic(err)
 			}
@@ -179,7 +177,7 @@ func main() {
 		}
 
 		if *action == "set" {
-			tx, err := st.NewWriteOnlyTx()
+			tx, err := st.NewWriteOnlyTx(context.Background())
 			if err != nil {
 				panic(err)
 			}
@@ -189,7 +187,7 @@ func main() {
 				panic(err)
 			}
 
-			_, err = tx.Commit()
+			_, err = tx.Commit(context.Background())
 			if err != nil {
 				panic(err)
 			}
@@ -270,7 +268,7 @@ func main() {
 				ids := make([]uint64, *txCount)
 
 				for t := 0; t < *txCount; t++ {
-					tx, err := immuStore.NewWriteOnlyTx()
+					tx, err := immuStore.NewWriteOnlyTx(context.Background())
 					if err != nil {
 						panic(err)
 					}
@@ -282,7 +280,7 @@ func main() {
 						}
 					}
 
-					txhdr, err := tx.Commit()
+					txhdr, err := tx.Commit(context.Background())
 					if err != nil {
 						panic(err)
 					}
@@ -309,7 +307,7 @@ func main() {
 					defer txHolderPool.Release(txHolder)
 
 					for i := range ids {
-						immuStore.ReadTx(ids[i], txHolder)
+						immuStore.ReadTx(ids[i], true, txHolder)
 
 						for ei, e := range txHolder.Entries() {
 							if !bytes.Equal(e.Key(), entries[i][ei].Key) {
@@ -368,7 +366,7 @@ func main() {
 			for {
 				tx, err := txReader.Read()
 				if err != nil {
-					if err == store.ErrNoMoreEntries {
+					if errors.Is(err, store.ErrNoMoreEntries) {
 						break
 					}
 					panic(err)

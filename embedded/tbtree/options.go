@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,34 +18,39 @@ package tbtree
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"time"
 
 	"github.com/codenotary/immudb/embedded/appendable"
 	"github.com/codenotary/immudb/embedded/appendable/multiapp"
-	"github.com/codenotary/immudb/pkg/logger"
+	"github.com/codenotary/immudb/embedded/cache"
+	"github.com/codenotary/immudb/embedded/logger"
 )
 
-const DefaultMaxNodeSize = 4096
-const DefaultFlushThld = 100_000
-const DefaultSyncThld = 1_000_000
-const DefaultFlushBufferSize = 4096
-const DefaultCleanUpPercentage float32 = 0
-const DefaultMaxActiveSnapshots = 100
-const DefaultRenewSnapRootAfter = time.Duration(1000) * time.Millisecond
-const DefaultCacheSize = 100_000
-const DefaultFileMode = os.FileMode(0755)
-const DefaultFileSize = 1 << 26 // 64Mb
-const DefaultMaxKeySize = 1024
-const DefaultMaxValueSize = 512
-const DefaultCompactionThld = 2
-const DefaultDelayDuringCompaction = time.Duration(10) * time.Millisecond
+const (
+	DefaultMaxNodeSize                   = 4096
+	DefaultFlushThld                     = 100_000
+	DefaultSyncThld                      = 1_000_000
+	DefaultFlushBufferSize               = 4096
+	DefaultMaxBufferedDataSize           = 1 << 22 // 4MB
+	DefaultCleanUpPercentage     float32 = 0
+	DefaultMaxActiveSnapshots            = 100
+	DefaultRenewSnapRootAfter            = time.Duration(1000) * time.Millisecond
+	DefaultCacheSize                     = 1 << 27 // 128Mb
+	DefaultFileMode                      = os.FileMode(0755)
+	DefaultFileSize                      = 1 << 26 // 64Mb
+	DefaultMaxKeySize                    = 1024
+	DefaultMaxValueSize                  = 512
+	DefaultCompactionThld                = 2
+	DefaultDelayDuringCompaction         = time.Duration(10) * time.Millisecond
 
-const DefaultNodesLogMaxOpenedFiles = 10
-const DefaultHistoryLogMaxOpenedFiles = 1
-const DefaultCommitLogMaxOpenedFiles = 1
+	DefaultNodesLogMaxOpenedFiles   = 10
+	DefaultHistoryLogMaxOpenedFiles = 1
+	DefaultCommitLogMaxOpenedFiles  = 1
 
-const MinCacheSize = 1
+	MinCacheSize = 1
+)
 
 type AppFactoryFunc func(
 	rootPath string,
@@ -53,18 +58,25 @@ type AppFactoryFunc func(
 	opts *multiapp.Options,
 ) (appendable.Appendable, error)
 
+type AppRemoveFunc func(rootPath, subPath string) error
+
+type OnFlushFunc func(releasedDataSize int)
+
 type Options struct {
 	logger logger.Logger
 
-	flushThld          int
-	syncThld           int
-	flushBufferSize    int
-	cleanupPercentage  float32
-	maxActiveSnapshots int
-	renewSnapRootAfter time.Duration
-	cacheSize          int
-	readOnly           bool
-	fileMode           os.FileMode
+	ID                  uint16
+	flushThld           int
+	syncThld            int
+	maxBufferedDataSize int // maximum amount of KV data that can be buffered before triggering flushing
+	flushBufferSize     int
+	cleanupPercentage   float32
+	maxActiveSnapshots  int
+	renewSnapRootAfter  time.Duration
+	cacheSize           int
+	cache               *cache.Cache
+	readOnly            bool
+	fileMode            os.FileMode
 
 	nodesLogMaxOpenedFiles   int
 	historyLogMaxOpenedFiles int
@@ -80,11 +92,15 @@ type Options struct {
 	fileSize     int
 
 	appFactory AppFactoryFunc
+	appRemove  AppRemoveFunc
+	onFlush    OnFlushFunc
 }
 
 func DefaultOptions() *Options {
 	return &Options{
 		logger:                logger.NewSimpleLogger("immudb ", os.Stderr),
+		ID:                    0,
+		maxBufferedDataSize:   DefaultMaxBufferedDataSize,
 		flushThld:             DefaultFlushThld,
 		syncThld:              DefaultSyncThld,
 		flushBufferSize:       DefaultFlushBufferSize,
@@ -118,11 +134,11 @@ func (opts *Options) Validate() error {
 		return fmt.Errorf("%w: invalid FileSize", ErrInvalidOptions)
 	}
 
-	if opts.maxKeySize <= 0 {
+	if opts.maxKeySize <= 0 || opts.maxKeySize > math.MaxUint16 {
 		return fmt.Errorf("%w: invalid MaxKeySize", ErrInvalidOptions)
 	}
 
-	if opts.maxValueSize <= 0 {
+	if opts.maxValueSize <= 0 || opts.maxValueSize > math.MaxUint16 {
 		return fmt.Errorf("%w: invalid MaxValueSize", ErrInvalidOptions)
 	}
 
@@ -170,7 +186,7 @@ func (opts *Options) Validate() error {
 		return fmt.Errorf("%w: invalid RenewSnapRootAfter", ErrInvalidOptions)
 	}
 
-	if opts.cacheSize < MinCacheSize {
+	if opts.cacheSize < MinCacheSize || (opts.cacheSize == 0 && opts.cache == nil) {
 		return fmt.Errorf("%w: invalid CacheSize", ErrInvalidOptions)
 	}
 
@@ -192,6 +208,11 @@ func (opts *Options) WithLogger(logger logger.Logger) *Options {
 
 func (opts *Options) WithAppFactory(appFactory AppFactoryFunc) *Options {
 	opts.appFactory = appFactory
+	return opts
+}
+
+func (opts *Options) WithAppRemoveFunc(AppRemove AppRemoveFunc) *Options {
+	opts.appRemove = AppRemove
 	return opts
 }
 
@@ -227,6 +248,11 @@ func (opts *Options) WithRenewSnapRootAfter(renewSnapRootAfter time.Duration) *O
 
 func (opts *Options) WithCacheSize(cacheSize int) *Options {
 	opts.cacheSize = cacheSize
+	return opts
+}
+
+func (opts *Options) WithCache(cache *cache.Cache) *Options {
+	opts.cache = cache
 	return opts
 }
 
@@ -282,5 +308,20 @@ func (opts *Options) WithCompactionThld(compactionThld int) *Options {
 
 func (opts *Options) WithDelayDuringCompaction(delay time.Duration) *Options {
 	opts.delayDuringCompaction = delay
+	return opts
+}
+
+func (opts *Options) WithIdentifier(id uint16) *Options {
+	opts.ID = id
+	return opts
+}
+
+func (opts *Options) WithMaxBufferedDataSize(size int) *Options {
+	opts.maxBufferedDataSize = size
+	return opts
+}
+
+func (opts *Options) WithOnFlushFunc(onFlush OnFlushFunc) *Options {
+	opts.onFlush = onFlush
 	return opts
 }

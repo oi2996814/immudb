@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ limitations under the License.
 package sql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,35 +27,33 @@ func TestDistinctRowReader(t *testing.T) {
 	dummyr := &dummyRowReader{failReturningColumns: false}
 
 	dummyr.failReturningColumns = true
-	_, err := newDistinctRowReader(dummyr)
-	require.Equal(t, errDummy, err)
+	_, err := newDistinctRowReader(context.Background(), dummyr)
+	require.ErrorIs(t, err, errDummy)
 
 	dummyr.failReturningColumns = false
 
-	rowReader, err := newDistinctRowReader(dummyr)
+	rowReader, err := newDistinctRowReader(context.Background(), dummyr)
 	require.NoError(t, err)
-
-	require.Equal(t, dummyr.Database(), rowReader.Database())
 	require.Equal(t, dummyr.TableAlias(), rowReader.TableAlias())
 	require.Equal(t, dummyr.OrderBy(), rowReader.OrderBy())
 	require.Equal(t, dummyr.ScanSpecs(), rowReader.ScanSpecs())
 
 	require.Nil(t, rowReader.Tx())
 
-	_, err = rowReader.colsBySelector()
-	require.Equal(t, errDummy, err)
+	_, err = rowReader.colsBySelector(context.Background())
+	require.ErrorIs(t, err, errDummy)
 
 	dummyr.failReturningColumns = true
-	_, err = rowReader.Columns()
-	require.Equal(t, errDummy, err)
+	_, err = rowReader.Columns(context.Background())
+	require.ErrorIs(t, err, errDummy)
 
 	require.Nil(t, rowReader.Parameters())
 
-	err = rowReader.InferParameters(nil)
+	err = rowReader.InferParameters(context.Background(), nil)
 	require.NoError(t, err)
 
 	dummyr.failInferringParams = true
 
-	err = rowReader.InferParameters(nil)
-	require.Equal(t, errDummy, err)
+	err = rowReader.InferParameters(context.Background(), nil)
+	require.ErrorIs(t, err, errDummy)
 }

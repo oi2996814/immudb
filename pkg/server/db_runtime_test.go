@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"testing"
 
 	"github.com/codenotary/immudb/pkg/api/schema"
@@ -32,9 +30,7 @@ import (
 )
 
 func TestServerDatabaseRuntime(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -53,7 +49,7 @@ func TestServerDatabaseRuntime(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx = metadata.NewIncomingContext(context.TODO(), metadata.New(map[string]string{"sessionid": resp.GetSessionID()}))
+	ctx = metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{"sessionid": resp.GetSessionID()}))
 
 	t.Run("reserved databases can not be updated", func(t *testing.T) {
 		_, err = s.UpdateDatabaseV2(ctx, &schema.UpdateDatabaseRequest{
@@ -62,8 +58,7 @@ func TestServerDatabaseRuntime(t *testing.T) {
 				Autoload: &schema.NullableBool{Value: false},
 			},
 		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "database is reserved")
+		require.ErrorIs(t, err, ErrReservedDatabase)
 
 		_, err = s.UpdateDatabaseV2(ctx, &schema.UpdateDatabaseRequest{
 			Database: DefaultDBName,
@@ -71,8 +66,7 @@ func TestServerDatabaseRuntime(t *testing.T) {
 				Autoload: &schema.NullableBool{Value: false},
 			},
 		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "database is reserved")
+		require.ErrorIs(t, err, ErrReservedDatabase)
 	})
 
 	t.Run("user created databases can be updated", func(t *testing.T) {
@@ -144,9 +138,7 @@ func TestServerDatabaseRuntime(t *testing.T) {
 }
 
 func TestServerDatabaseRuntimeEdgeCases(t *testing.T) {
-	dir, err := ioutil.TempDir("", "server_test")
-	require.NoError(t, err)
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 
 	opts := DefaultOptions().WithDir(dir)
 
@@ -165,7 +157,7 @@ func TestServerDatabaseRuntimeEdgeCases(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ctx = metadata.NewIncomingContext(context.TODO(), metadata.New(map[string]string{"sessionid": resp.GetSessionID()}))
+	ctx = metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{"sessionid": resp.GetSessionID()}))
 
 	for i, c := range []struct {
 		req *schema.LoadDatabaseRequest

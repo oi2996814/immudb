@@ -5,6 +5,7 @@
     "description": "\u003cb\u003eIMPORTANT\u003c/b\u003e: All \u003ccode\u003eget\u003c/code\u003e and \u003ccode\u003esafeget\u003c/code\u003e functions return \u003cu\u003ebase64-encoded\u003c/u\u003e keys and values, while all \u003ccode\u003eset\u003c/code\u003e and \u003ccode\u003esafeset\u003c/code\u003e functions expect \u003cu\u003ebase64-encoded\u003c/u\u003e inputs.",
     "version": "version not set"
   },
+  "basePath": "/api",
   "consumes": [
     "application/json"
   ],
@@ -211,6 +212,38 @@
             "required": true,
             "schema": {
               "$ref": "#/definitions/schemaDeleteDatabaseRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ImmuService"
+        ]
+      }
+    },
+    "/db/deletekey": {
+      "post": {
+        "operationId": "ImmuService_Delete",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/schemaTxHeader"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/schemaDeleteKeysRequest"
             }
           }
         ],
@@ -735,9 +768,18 @@
         "operationId": "ImmuService_SQLQuery",
         "responses": {
           "200": {
-            "description": "A successful response.",
+            "description": "A successful response.(streaming responses)",
             "schema": {
-              "$ref": "#/definitions/schemaSQLQueryResult"
+              "type": "object",
+              "properties": {
+                "result": {
+                  "$ref": "#/definitions/schemaSQLQueryResult"
+                },
+                "error": {
+                  "$ref": "#/definitions/runtimeStreamError"
+                }
+              },
+              "title": "Stream result of schemaSQLQueryResult"
             }
           },
           "default": {
@@ -831,6 +873,38 @@
             "required": true,
             "schema": {
               "$ref": "#/definitions/schemaTable"
+            }
+          }
+        ],
+        "tags": [
+          "ImmuService"
+        ]
+      }
+    },
+    "/db/truncate": {
+      "post": {
+        "operationId": "ImmuService_TruncateDatabase",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/schemaTruncateDatabaseResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/schemaTruncateDatabaseRequest"
             }
           }
         ],
@@ -949,7 +1023,7 @@
           },
           {
             "name": "noWait",
-            "description": "If set to true, do not wait for the indexer to be up to date.",
+            "description": "Deprecated: If set to true, do not wait for the indexer to be up to date.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -1309,7 +1383,7 @@
           },
           {
             "name": "noWait",
-            "description": "If set to true, do not wait for the indexer to be up to date.",
+            "description": "Deprecated: If set to true, do not wait for the indexer to be up to date.",
             "in": "query",
             "required": false,
             "type": "boolean"
@@ -1600,6 +1674,38 @@
         ]
       }
     },
+    "/user/changesqlprivileges": {
+      "post": {
+        "operationId": "ImmuService_ChangeSQLPrivileges",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/schemaChangeSQLPrivilegesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/runtimeError"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/schemaChangeSQLPrivilegesRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ImmuService"
+        ]
+      }
+    },
     "/user/list": {
       "get": {
         "operationId": "ImmuService_ListUsers",
@@ -1739,7 +1845,7 @@
           "description": "Must be a valid serialized protocol buffer of the above specified type."
         }
       },
-      "description": "`Any` contains an arbitrary serialized protocol buffer message along with a\nURL that describes the type of the serialized message.\n\nProtobuf library provides support to pack/unpack Any values in the form\nof utility functions or additional generated methods of the Any type.\n\nExample 1: Pack and unpack a message in C++.\n\n    Foo foo = ...;\n    Any any;\n    any.PackFrom(foo);\n    ...\n    if (any.UnpackTo(\u0026foo)) {\n      ...\n    }\n\nExample 2: Pack and unpack a message in Java.\n\n    Foo foo = ...;\n    Any any = Any.pack(foo);\n    ...\n    if (any.is(Foo.class)) {\n      foo = any.unpack(Foo.class);\n    }\n\n Example 3: Pack and unpack a message in Python.\n\n    foo = Foo(...)\n    any = Any()\n    any.Pack(foo)\n    ...\n    if any.Is(Foo.DESCRIPTOR):\n      any.Unpack(foo)\n      ...\n\n Example 4: Pack and unpack a message in Go\n\n     foo := \u0026pb.Foo{...}\n     any, err := ptypes.MarshalAny(foo)\n     ...\n     foo := \u0026pb.Foo{}\n     if err := ptypes.UnmarshalAny(any, foo); err != nil {\n       ...\n     }\n\nThe pack methods provided by protobuf library will by default use\n'type.googleapis.com/full.type.name' as the type URL and the unpack\nmethods only use the fully qualified type name after the last '/'\nin the type URL, for example \"foo.bar.com/x/y.z\" will yield type\nname \"y.z\".\n\n\nJSON\n====\nThe JSON representation of an `Any` value uses the regular\nrepresentation of the deserialized, embedded message, with an\nadditional field `@type` which contains the type URL. Example:\n\n    package google.profile;\n    message Person {\n      string first_name = 1;\n      string last_name = 2;\n    }\n\n    {\n      \"@type\": \"type.googleapis.com/google.profile.Person\",\n      \"firstName\": \u003cstring\u003e,\n      \"lastName\": \u003cstring\u003e\n    }\n\nIf the embedded message type is well-known and has a custom JSON\nrepresentation, that representation will be embedded adding a field\n`value` which holds the custom JSON in addition to the `@type`\nfield. Example (for message [google.protobuf.Duration][]):\n\n    {\n      \"@type\": \"type.googleapis.com/google.protobuf.Duration\",\n      \"value\": \"1.212s\"\n    }"
+      "description": "`Any` contains an arbitrary serialized protocol buffer message along with a\nURL that describes the type of the serialized message.\n\nProtobuf library provides support to pack/unpack Any values in the form\nof utility functions or additional generated methods of the Any type.\n\nExample 1: Pack and unpack a message in C++.\n\n    Foo foo = ...;\n    Any any;\n    any.PackFrom(foo);\n    ...\n    if (any.UnpackTo(\u0026foo)) {\n      ...\n    }\n\nExample 2: Pack and unpack a message in Java.\n\n    Foo foo = ...;\n    Any any = Any.pack(foo);\n    ...\n    if (any.is(Foo.class)) {\n      foo = any.unpack(Foo.class);\n    }\n\nExample 3: Pack and unpack a message in Python.\n\n    foo = Foo(...)\n    any = Any()\n    any.Pack(foo)\n    ...\n    if any.Is(Foo.DESCRIPTOR):\n      any.Unpack(foo)\n      ...\n\nExample 4: Pack and unpack a message in Go\n\n     foo := \u0026pb.Foo{...}\n     any, err := anypb.New(foo)\n     if err != nil {\n       ...\n     }\n     ...\n     foo := \u0026pb.Foo{}\n     if err := any.UnmarshalTo(foo); err != nil {\n       ...\n     }\n\nThe pack methods provided by protobuf library will by default use\n'type.googleapis.com/full.type.name' as the type URL and the unpack\nmethods only use the fully qualified type name after the last '/'\nin the type URL, for example \"foo.bar.com/x/y.z\" will yield type\nname \"y.z\".\n\n\nJSON\n\nThe JSON representation of an `Any` value uses the regular\nrepresentation of the deserialized, embedded message, with an\nadditional field `@type` which contains the type URL. Example:\n\n    package google.profile;\n    message Person {\n      string first_name = 1;\n      string last_name = 2;\n    }\n\n    {\n      \"@type\": \"type.googleapis.com/google.profile.Person\",\n      \"firstName\": \u003cstring\u003e,\n      \"lastName\": \u003cstring\u003e\n    }\n\nIf the embedded message type is well-known and has a custom JSON\nrepresentation, that representation will be embedded adding a field\n`value` which holds the custom JSON in addition to the `@type`\nfield. Example (for message [google.protobuf.Duration][]):\n\n    {\n      \"@type\": \"type.googleapis.com/google.protobuf.Duration\",\n      \"value\": \"1.212s\"\n    }"
     },
     "protobufNullValue": {
       "type": "string",
@@ -1850,12 +1956,46 @@
         }
       }
     },
+    "schemaChangeSQLPrivilegesRequest": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/schemaPermissionAction",
+          "title": "Action to perform"
+        },
+        "username": {
+          "type": "string",
+          "title": "Name of the user to update"
+        },
+        "database": {
+          "type": "string",
+          "title": "Name of the database"
+        },
+        "privileges": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "SQL privileges: SELECT, CREATE, INSERT, UPDATE, DELETE, DROP, ALTER"
+        }
+      }
+    },
+    "schemaChangeSQLPrivilegesResponse": {
+      "type": "object"
+    },
     "schemaChunk": {
       "type": "object",
       "properties": {
         "content": {
           "type": "string",
           "format": "byte"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "byte"
+          }
         }
       }
     },
@@ -1982,6 +2122,42 @@
         }
       }
     },
+    "schemaDatabaseInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "title": "Database name"
+        },
+        "settings": {
+          "$ref": "#/definitions/schemaDatabaseNullableSettings",
+          "title": "Current database settings"
+        },
+        "loaded": {
+          "type": "boolean",
+          "title": "If true, this database is currently loaded into memory"
+        },
+        "diskSize": {
+          "type": "string",
+          "format": "uint64",
+          "title": "database disk size"
+        },
+        "numTransactions": {
+          "type": "string",
+          "format": "uint64",
+          "title": "total number of transactions"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "uint64",
+          "title": "the time when the db was created"
+        },
+        "created_by": {
+          "type": "string",
+          "title": "the user who created the database"
+        }
+      }
+    },
     "schemaDatabaseListRequestV2": {
       "type": "object"
     },
@@ -2003,7 +2179,7 @@
         "databases": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/schemaDatabaseWithSettings"
+            "$ref": "#/definitions/schemaDatabaseInfo"
           },
           "title": "Database list with current database settings"
         }
@@ -2046,7 +2222,7 @@
         },
         "txLogCacheSize": {
           "$ref": "#/definitions/schemaNullableUint32",
-          "title": "Size of the LRU cache for transaction logs"
+          "title": "Size of the cache for transaction logs"
         },
         "vLogMaxOpenedFiles": {
           "$ref": "#/definitions/schemaNullableUint32",
@@ -2087,6 +2263,30 @@
         "ahtSettings": {
           "$ref": "#/definitions/schemaAHTNullableSettings",
           "title": "Settings of Appendable Hash Tree"
+        },
+        "maxActiveTransactions": {
+          "$ref": "#/definitions/schemaNullableUint32",
+          "title": "Maximum number of pre-committed transactions"
+        },
+        "mvccReadSetLimit": {
+          "$ref": "#/definitions/schemaNullableUint32",
+          "title": "Limit the number of read entries per transaction"
+        },
+        "vLogCacheSize": {
+          "$ref": "#/definitions/schemaNullableUint32",
+          "title": "Size of the cache for value logs"
+        },
+        "truncationSettings": {
+          "$ref": "#/definitions/schemaTruncationNullableSettings",
+          "title": "Truncation settings"
+        },
+        "embeddedValues": {
+          "$ref": "#/definitions/schemaNullableBool",
+          "title": "If set to true, values are stored together with the transaction header (true by default)"
+        },
+        "preallocFiles": {
+          "$ref": "#/definitions/schemaNullableBool",
+          "title": "Enable file preallocation"
         }
       }
     },
@@ -2101,24 +2301,24 @@
           "type": "boolean",
           "title": "If set to true, this database is replicating another database"
         },
-        "masterDatabase": {
+        "primaryDatabase": {
           "type": "string",
           "title": "Name of the database to replicate"
         },
-        "masterAddress": {
+        "primaryHost": {
           "type": "string",
           "title": "Hostname of the immudb instance with database to replicate"
         },
-        "masterPort": {
+        "primaryPort": {
           "type": "integer",
           "format": "int64",
           "title": "Port of the immudb instance with database to replicate"
         },
-        "followerUsername": {
+        "primaryUsername": {
           "type": "string",
           "title": "Username of the user with read access of the database to replicate"
         },
-        "followerPassword": {
+        "primaryPassword": {
           "type": "string",
           "title": "Password of the user with read access of the database to replicate"
         },
@@ -2161,23 +2361,6 @@
         "settings": {
           "$ref": "#/definitions/schemaDatabaseNullableSettings",
           "title": "Database settings"
-        }
-      }
-    },
-    "schemaDatabaseWithSettings": {
-      "type": "object",
-      "properties": {
-        "name": {
-          "type": "string",
-          "title": "Database name"
-        },
-        "settings": {
-          "$ref": "#/definitions/schemaDatabaseNullableSettings",
-          "title": "Current database settings"
-        },
-        "loaded": {
-          "type": "boolean",
-          "title": "If true, this database is currently loaded into memory"
         }
       }
     },
@@ -2264,6 +2447,10 @@
         "linearProof": {
           "$ref": "#/definitions/schemaLinearProof",
           "title": "Linear proof starting from targetBlTxAlh to the final state value"
+        },
+        "LinearAdvanceProof": {
+          "$ref": "#/definitions/schemaLinearAdvanceProof",
+          "title": "Proof of consistency between some part of older linear chain and newer Merkle Tree"
         }
       },
       "title": "DualProof contains inclusion and consistency proofs for dual Merkle-Tree + Linear proofs"
@@ -2405,30 +2592,6 @@
         }
       }
     },
-    "schemaFollowerState": {
-      "type": "object",
-      "properties": {
-        "UUID": {
-          "type": "string"
-        },
-        "committedTxID": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "committedAlh": {
-          "type": "string",
-          "format": "byte"
-        },
-        "precommittedTxID": {
-          "type": "string",
-          "format": "uint64"
-        },
-        "precommittedAlh": {
-          "type": "string",
-          "format": "byte"
-        }
-      }
-    },
     "schemaHealthResponse": {
       "type": "object",
       "properties": {
@@ -2540,7 +2703,7 @@
         },
         "cacheSize": {
           "$ref": "#/definitions/schemaNullableUint32",
-          "title": "Size of the Btree node LRU cache"
+          "title": "Size of the Btree node cache in bytes"
         },
         "maxNodeSize": {
           "$ref": "#/definitions/schemaNullableUint32",
@@ -2581,6 +2744,14 @@
         "cleanupPercentage": {
           "$ref": "#/definitions/schemaNullableFloat",
           "title": "Percentage of node files cleaned up during each flush"
+        },
+        "maxBulkSize": {
+          "$ref": "#/definitions/schemaNullableUint32",
+          "title": "Maximum number of transactions indexed together"
+        },
+        "bulkPreparationTimeout": {
+          "$ref": "#/definitions/schemaNullableMilliseconds",
+          "title": "Maximum time waiting for more transactions to be committed and included into the same bulk"
         }
       }
     },
@@ -2663,6 +2834,27 @@
           "$ref": "#/definitions/schemaKVMetadata"
         }
       }
+    },
+    "schemaLinearAdvanceProof": {
+      "type": "object",
+      "properties": {
+        "linearProofTerms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "byte"
+          },
+          "title": "terms for the linear chain"
+        },
+        "inclusionProofs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/schemaInclusionProof"
+          },
+          "title": "inclusion proofs for steps on the linear chain"
+        }
+      },
+      "title": "LinearAdvanceProof contains the proof of consistency between the consumed part of the older linear chain\nand the new Merkle Tree"
     },
     "schemaLinearProof": {
       "type": "object",
@@ -2939,6 +3131,30 @@
         }
       }
     },
+    "schemaReplicaState": {
+      "type": "object",
+      "properties": {
+        "UUID": {
+          "type": "string"
+        },
+        "committedTxID": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "committedAlh": {
+          "type": "string",
+          "format": "byte"
+        },
+        "precommittedTxID": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "precommittedAlh": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
     "schemaReplicationNullableSettings": {
       "type": "object",
       "properties": {
@@ -2946,23 +3162,23 @@
           "$ref": "#/definitions/schemaNullableBool",
           "title": "If set to true, this database is replicating another database"
         },
-        "masterDatabase": {
+        "primaryDatabase": {
           "$ref": "#/definitions/schemaNullableString",
           "title": "Name of the database to replicate"
         },
-        "masterAddress": {
+        "primaryHost": {
           "$ref": "#/definitions/schemaNullableString",
           "title": "Hostname of the immudb instance with database to replicate"
         },
-        "masterPort": {
+        "primaryPort": {
           "$ref": "#/definitions/schemaNullableUint32",
           "title": "Port of the immudb instance with database to replicate"
         },
-        "followerUsername": {
+        "primaryUsername": {
           "$ref": "#/definitions/schemaNullableString",
           "title": "Username of the user with read access of the database to replicate"
         },
-        "followerPassword": {
+        "primaryPassword": {
           "$ref": "#/definitions/schemaNullableString",
           "title": "Password of the user with read access of the database to replicate"
         },
@@ -2982,9 +3198,17 @@
           "$ref": "#/definitions/schemaNullableUint32",
           "title": "Number of concurrent replications"
         },
-        "AllowTxDiscarding": {
+        "allowTxDiscarding": {
           "$ref": "#/definitions/schemaNullableBool",
-          "title": "Allow precommitted transactions to be discarded if the follower diverges from the master"
+          "title": "Allow precommitted transactions to be discarded if the replica diverges from the primary"
+        },
+        "skipIntegrityCheck": {
+          "$ref": "#/definitions/schemaNullableBool",
+          "title": "Disable integrity check when reading data during replication"
+        },
+        "waitForIndexing": {
+          "$ref": "#/definitions/schemaNullableBool",
+          "title": "Wait for indexing to be up to date during replication"
         }
       }
     },
@@ -3093,6 +3317,19 @@
         }
       }
     },
+    "schemaSQLPrivilege": {
+      "type": "object",
+      "properties": {
+        "database": {
+          "type": "string",
+          "title": "Database name"
+        },
+        "privilege": {
+          "type": "string",
+          "title": "Privilege: SELECT, CREATE, INSERT, UPDATE, DELETE, DROP, ALTER"
+        }
+      }
+    },
     "schemaSQLQueryRequest": {
       "type": "object",
       "properties": {
@@ -3110,6 +3347,10 @@
         "reuseSnapshot": {
           "type": "boolean",
           "title": "If true, reuse previously opened snapshot"
+        },
+        "acceptStream": {
+          "type": "boolean",
+          "title": "Wheter the client accepts a streaming response"
         }
       }
     },
@@ -3155,6 +3396,10 @@
         "ts": {
           "type": "string",
           "format": "int64"
+        },
+        "f": {
+          "type": "number",
+          "format": "double"
         }
       }
     },
@@ -3192,7 +3437,7 @@
         },
         "noWait": {
           "type": "boolean",
-          "title": "If set to true, do not wait for indexing to be done before finishing this call"
+          "title": "Deprecated: If set to true, do not wait for indexing to be done before finishing this call"
         },
         "inclusiveSeek": {
           "type": "boolean",
@@ -3225,6 +3470,26 @@
         "version": {
           "type": "string",
           "description": "The version of the server instance."
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "int64",
+          "description": "Unix timestamp (seconds) indicating when the server process has been started."
+        },
+        "numTransactions": {
+          "type": "string",
+          "format": "int64",
+          "description": "Total number of transactions across all databases."
+        },
+        "numDatabases": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Total number of databases present."
+        },
+        "databasesDiskSize": {
+          "type": "string",
+          "format": "int64",
+          "description": "Total disk size used by all databases."
         }
       },
       "description": "ServerInfoResponse contains information about the server instance."
@@ -3284,6 +3549,42 @@
         "tableName": {
           "type": "string",
           "title": "Table name"
+        }
+      }
+    },
+    "schemaTruncateDatabaseRequest": {
+      "type": "object",
+      "properties": {
+        "database": {
+          "type": "string",
+          "title": "Database name"
+        },
+        "retentionPeriod": {
+          "type": "string",
+          "format": "int64",
+          "title": "Retention Period of data"
+        }
+      }
+    },
+    "schemaTruncateDatabaseResponse": {
+      "type": "object",
+      "properties": {
+        "database": {
+          "type": "string",
+          "title": "Database name"
+        }
+      }
+    },
+    "schemaTruncationNullableSettings": {
+      "type": "object",
+      "properties": {
+        "retentionPeriod": {
+          "$ref": "#/definitions/schemaNullableMilliseconds",
+          "title": "Retention Period for data in the database"
+        },
+        "truncationFrequency": {
+          "$ref": "#/definitions/schemaNullableMilliseconds",
+          "title": "Truncation Frequency for the database"
         }
       }
     },
@@ -3409,6 +3710,18 @@
     },
     "schemaTxMetadata": {
       "type": "object",
+      "properties": {
+        "truncatedTxID": {
+          "type": "string",
+          "format": "uint64",
+          "title": "Entry expiration information"
+        },
+        "extra": {
+          "type": "string",
+          "format": "byte",
+          "title": "Extra data"
+        }
+      },
       "title": "TxMetadata contains metadata set to whole transaction"
     },
     "schemaTxMode": {
@@ -3449,7 +3762,7 @@
         },
         "noWait": {
           "type": "boolean",
-          "title": "If set to true, do not wait for the indexer to be up to date"
+          "title": "Deprecated: If set to true, do not wait for the indexer to be up to date"
         }
       }
     },
@@ -3533,6 +3846,13 @@
         "active": {
           "type": "boolean",
           "title": "Flag indicating whether the user is active or not"
+        },
+        "sqlPrivileges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/schemaSQLPrivilege"
+          },
+          "title": "List of SQL privileges"
         }
       }
     },
@@ -3655,6 +3975,11 @@
             "format": "int32"
           },
           "title": "Mapping of column IDs to their length constraints"
+        },
+        "MaxColId": {
+          "type": "integer",
+          "format": "int64",
+          "title": "Variable is used to assign unique ids to new columns as they are created"
         }
       }
     },
@@ -3841,7 +4166,7 @@
         },
         "noWait": {
           "type": "boolean",
-          "title": "If set to true, do not wait for the indexer to be up to date"
+          "title": "Deprecated: If set to true, do not wait for the indexer to be up to date"
         },
         "offset": {
           "type": "string",

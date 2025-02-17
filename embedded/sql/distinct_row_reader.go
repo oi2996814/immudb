@@ -1,11 +1,11 @@
 /*
-Copyright 2022 Codenotary Inc. All rights reserved.
+Copyright 2024 Codenotary Inc. All rights reserved.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+SPDX-License-Identifier: BUSL-1.1
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-	http://www.apache.org/licenses/LICENSE-2.0
+    https://mariadb.com/bsl11/
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,10 @@ limitations under the License.
 
 package sql
 
-import "crypto/sha256"
+import (
+	"context"
+	"crypto/sha256"
+)
 
 type distinctRowReader struct {
 	rowReader RowReader
@@ -25,8 +28,8 @@ type distinctRowReader struct {
 	readRows map[[sha256.Size]byte]struct{}
 }
 
-func newDistinctRowReader(rowReader RowReader) (*distinctRowReader, error) {
-	cols, err := rowReader.Columns()
+func newDistinctRowReader(ctx context.Context, rowReader RowReader) (*distinctRowReader, error) {
+	cols, err := rowReader.Columns(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -46,20 +49,12 @@ func (dr *distinctRowReader) Tx() *SQLTx {
 	return dr.rowReader.Tx()
 }
 
-func (dr *distinctRowReader) Database() string {
-	return dr.rowReader.Database()
-}
-
 func (dr *distinctRowReader) TableAlias() string {
 	return dr.rowReader.TableAlias()
 }
 
 func (dr *distinctRowReader) Parameters() map[string]interface{} {
 	return dr.rowReader.Parameters()
-}
-
-func (dr *distinctRowReader) SetParameters(params map[string]interface{}) error {
-	return dr.rowReader.SetParameters(params)
 }
 
 func (dr *distinctRowReader) OrderBy() []ColDescriptor {
@@ -70,25 +65,25 @@ func (dr *distinctRowReader) ScanSpecs() *ScanSpecs {
 	return dr.rowReader.ScanSpecs()
 }
 
-func (dr *distinctRowReader) Columns() ([]ColDescriptor, error) {
-	return dr.rowReader.Columns()
+func (dr *distinctRowReader) Columns(ctx context.Context) ([]ColDescriptor, error) {
+	return dr.rowReader.Columns(ctx)
 }
 
-func (dr *distinctRowReader) colsBySelector() (map[string]ColDescriptor, error) {
-	return dr.rowReader.colsBySelector()
+func (dr *distinctRowReader) colsBySelector(ctx context.Context) (map[string]ColDescriptor, error) {
+	return dr.rowReader.colsBySelector(ctx)
 }
 
-func (dr *distinctRowReader) InferParameters(params map[string]SQLValueType) error {
-	return dr.rowReader.InferParameters(params)
+func (dr *distinctRowReader) InferParameters(ctx context.Context, params map[string]SQLValueType) error {
+	return dr.rowReader.InferParameters(ctx, params)
 }
 
-func (dr *distinctRowReader) Read() (*Row, error) {
+func (dr *distinctRowReader) Read(ctx context.Context) (*Row, error) {
 	for {
 		if len(dr.readRows) == dr.rowReader.Tx().distinctLimit() {
 			return nil, ErrTooManyRows
 		}
 
-		row, err := dr.rowReader.Read()
+		row, err := dr.rowReader.Read(ctx)
 		if err != nil {
 			return nil, err
 		}
